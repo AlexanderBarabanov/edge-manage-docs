@@ -213,7 +213,8 @@ jobs:
           COMMIT_SHA: ${{ needs.validate-input.outputs.commit_sha }}
         run: |
           echo "Updating comment on $SOURCE_REPO PR #$PR_NUM..."
+          PREVIEW_URL="https://preview-pr${PR_NUM}.docs.example.com"
           gh pr comment "${PR_NUM}" \
             --repo "${SOURCE_REPO}" \
-            --edit-last \
-            --body "✅ Documentation preview deployed successfully for commit \`${COMMIT_SHA:0:7}\`"
+            --body "✅ Documentation preview deployed successfully for commit \`${COMMIT_SHA:0:7}\`
+                    Preview URL: ${PREVIEW_URL}"
