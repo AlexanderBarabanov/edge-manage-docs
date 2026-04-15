@@ -1,0 +1,29 @@
+name: Deploy Documentation Preview
+
+on:
+  repository_dispatch:
+    types: [deploy-preview]
+
+permissions: {} # No permissions by default on workflow level
+
+jobs:
+  receive-and-display:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Display received payload
+        run: |
+          echo "=== Repository Dispatch Event Received ==="
+          echo ""
+          echo "Event Type: ${{ github.event.action }}"
+          echo ""
+          echo "=== Client Payload ==="
+          echo '${{ toJson(github.event.client_payload) }}' | jq '.'
+          echo ""
+          echo "=== Individual Payload Fields ==="
+          echo "Source Repo: ${{ github.event.client_payload.source_repo }}"
+          echo "PR Number: ${{ github.event.client_payload.pr_number }}"
+          echo "Commit SHA: ${{ github.event.client_payload.commit_sha }}"
+          echo "Triggered By: ${{ github.event.client_payload.triggered_by }}"
+          echo ""
+          echo "✓ Payload received and displayed successfully"
