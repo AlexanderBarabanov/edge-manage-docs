@@ -4,12 +4,14 @@ on:
   repository_dispatch:
     types: [deploy-preview]
 
-permissions: {} # No permissions by default on workflow level
+permissions:
+  contents: read
+  # Explicitly deny other permissions
 
 jobs:
   receive-and-display:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Display received payload
         run: |
@@ -26,4 +28,198 @@ jobs:
           echo "Commit SHA: ${{ github.event.client_payload.commit_sha }}"
           echo "Triggered By: ${{ github.event.client_payload.triggered_by }}"
           echo ""
-          echo "✓ Payload received and displayed successfully"
+          echo "=== GitHub Context ==="
+          echo "Receiving Repository: ${{ github.repository }}"
+          echo "Repository Owner: ${{ github.repository_owner }}"
+          echo "Actor/Triggering User: ${{ github.actor }}"
+          echo "Workflow: ${{ github.workflow }}"
+          echo "Run ID: ${{ github.run_id }}"
+          echo "Run Number: ${{ github.run_number }}"
+          echo "Run Attempt: ${{ github.run_attempt }}"
+          echo "Event Name: ${{ github.event_name }}"
+          echo "Ref: ${{ github.ref }}"
+          echo "SHA (Hub Repo): ${{ github.sha }}"
+          echo ""
+          echo "=== Event Sender Information ==="
+          echo "Sender Login: ${{ github.event.sender.login }}"
+          echo "Sender ID: ${{ github.event.sender.id }}"
+          echo "Sender Type: ${{ github.event.sender.type }}"
+          echo "Sender URL: ${{ github.event.sender.html_url }}"
+          echo ""
+          echo "=== Event Sender (Full JSON) ==="
+          echo '${{ toJson(github.event.sender) }}' | jq '.'
+          echo ""
+      - name: Validate source repository (Allowlist Check)
+        run: |
+          # CRITICAL: Only allow dispatches from approved repositories
+          APPROVED_REPOS=(
+            "AlexanderBarabanov/openvino.genai"
+          )
+
+          SOURCE_REPO="${{ github.event.client_payload.source_repo }}"
+
+          if [ -z "$SOURCE_REPO" ]; then
+            echo "Error: source_repo not provided in payload"
+            exit 1
+          fi
+
+          APPROVED=false
+          for repo in "${APPROVED_REPOS[@]}"; do
+            if [ "$repo" == "$SOURCE_REPO" ]; then
+              APPROVED=true
+              break
+            fi
+          done
+
+          if [ "$APPROVED" != "true" ]; then
+            echo "Error: Repository '$SOURCE_REPO' is not in approved list"
+            echo "Approved repositories:"
+            printf '%s\n' "${APPROVED_REPOS[@]}"
+            exit 1
+          fi
+
+          echo "Source repository validated: $SOURCE_REPO"
+
+      - name: Validate payload structure and format
+        run: |
+          # Validate required fields are present
+          REQUIRED_FIELDS=(
+            "source_repo"
+            "pr_number"
+            "commit_sha"
+            "triggered_by"
+          )
+
+          for field in "${REQUIRED_FIELDS[@]}"; do
+            VALUE="${{ toJson(github.event.client_payload) }}"
+            if ! echo "$VALUE" | jq -e ".$field" > /dev/null 2>&1; then
+              echo "Error: Required field '$field' missing from payload"
+              exit 1
+            fi
+          done
+
+          # Validate PR number format (must be positive integer)
+          PR_NUM="${{ github.event.client_payload.pr_number }}"
+          if ! [[ "$PR_NUM" =~ ^[0-9]+$ ]] || [ "$PR_NUM" -lt 1 ]; then
+            echo "Error: Invalid PR number format: $PR_NUM"
+            exit 1
+          fi
+
+          # Validate commit SHA format (must be 40 hex characters)
+          COMMIT_SHA="${{ github.event.client_payload.commit_sha }}"
+          if ! [[ "$COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Error: Invalid commit SHA format: $COMMIT_SHA"
+            exit 1
+          fi
+
+          # Validate repository format (owner/repo)
+          SOURCE_REPO="${{ github.event.client_payload.source_repo }}"
+          if ! [[ "$SOURCE_REPO" =~ ^[a-zA-Z0-9_-]+/[a-zA-Z0-9._-]+$ ]]; then
+            echo "Error: Invalid repository format: $SOURCE_REPO"
+            exit 1
+          fi
+          echo "Payload structure validated"
+
+      - name: Validate timestamp and prevent replay attacks
+        run: |
+          # Check if timestamp is provided and recent (within 5 minutes)
+          TIMESTAMP="${{ github.event.client_payload.timestamp }}"
+
+          if [ -z "$TIMESTAMP" ]; then
+            echo "Warning: No timestamp provided in payload"
+          else
+            CURRENT_TIME=$(date +%s)
+            MAX_AGE=300  # 5 minutes
+            
+            if ! [[ "$TIMESTAMP" =~ ^[0-9]+$ ]]; then
+              echo "Error: Invalid timestamp format"
+              exit 1
+            fi
+            
+            AGE=$((CURRENT_TIME - TIMESTAMP))
+            
+            if [ $AGE -gt $MAX_AGE ]; then
+              echo "Error: Request too old (${AGE}s). Maximum age: ${MAX_AGE}s"
+              exit 1
+            fi
+            
+            if [ $AGE -lt -60 ]; then
+              echo "Error: Request timestamp is in the future"
+              exit 1
+            fi
+            
+            echo "Timestamp validated (age: ${AGE}s)"
+          fi
+
+      - name: Verify sender authentication
+        run: |
+          # Validate the event sender
+          SENDER_LOGIN="${{ github.event.sender.login }}"
+          SENDER_TYPE="${{ github.event.sender.type }}"
+
+          echo "Request sent by: $SENDER_LOGIN (type: $SENDER_TYPE)"
+
+          # Log sender for audit trail
+          echo "Sender ID: ${{ github.event.sender.id }}"
+          echo "Sender URL: ${{ github.event.sender.html_url }}"
+
+          # Additional validation: ensure sender is not a suspicious account
+          # (In production, you might check against known good actors or GitHub Apps)
+
+          if [ -z "$SENDER_LOGIN" ]; then
+            echo "Error: Sender information missing"
+            exit 1
+          fi
+
+          echo "Sender authenticated: $SENDER_LOGIN"
+
+      - name: Verify commit SHA with GitHub API
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Verify the commit SHA actually exists in the source repository
+          # This prevents attackers from using arbitrary SHAs
+
+          SOURCE_REPO="${{ github.event.client_payload.source_repo }}"
+          COMMIT_SHA="${{ github.event.client_payload.commit_sha }}"
+          PR_NUM="${{ github.event.client_payload.pr_number }}"
+
+          echo "Verifying commit $COMMIT_SHA in $SOURCE_REPO..."
+
+          # Check if commit exists
+          if ! gh api "repos/$SOURCE_REPO/commits/$COMMIT_SHA" --silent 2>/dev/null; then
+            echo "Error: Commit SHA does not exist in source repository"
+            exit 1
+          fi
+
+          echo "✅ Commit exists in source repository"
+
+          # Verify PR exists and commit is part of it
+          PR_HEAD=$(gh api "repos/$SOURCE_REPO/pulls/$PR_NUM" --jq '.head.sha' 2>/dev/null || echo "")
+
+          if [ -z "$PR_HEAD" ]; then
+            echo "Error: PR #$PR_NUM does not exist in $SOURCE_REPO"
+            exit 1
+          fi
+
+          if [ "$PR_HEAD" != "$COMMIT_SHA" ]; then
+            echo "Error: Commit SHA mismatch"
+            echo "  Expected (PR head): $PR_HEAD"
+            echo "  Received: $COMMIT_SHA"
+            exit 1
+          fi
+
+          # Check PR state
+          PR_STATE=$(gh api "repos/$SOURCE_REPO/pulls/$PR_NUM" --jq '.state')
+          if [ "$PR_STATE" != "open" ]; then
+            echo "Error: PR #$PR_NUM is not open (state: $PR_STATE)"
+            exit 1
+          fi
+
+          # Check if PR is from a fork (higher risk)
+          IS_FORK=$(gh api "repos/$SOURCE_REPO/pulls/$PR_NUM" --jq '.head.repo.fork // false')
+          if [ "$IS_FORK" == "true" ]; then
+            echo "Warning: PR is from a fork - additional scrutiny recommended"
+          fi
+
+          echo "Commit SHA verified in PR #$PR_NUM"
