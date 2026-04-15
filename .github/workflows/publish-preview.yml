@@ -160,6 +160,9 @@ jobs:
     needs: validate-input
     permissions:
       contents: read
+    environment:
+      name: publish-preview
+      deployment: false
     steps:
       - name: Generate GitHub App token
         id: generate-token
