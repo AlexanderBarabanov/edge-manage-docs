@@ -220,14 +220,6 @@ jobs:
       name: publish-preview
       deployment: false
     steps:
-      - name: Debug outputs
-        run: |
-          echo "Source repo: ${{ needs.validate-input.outputs.source_repo }}"
-          echo "Repo owner: ${{ needs.validate-input.outputs.repo_owner }}"
-          echo "Repo name: ${{ needs.validate-input.outputs.repo_name }}"
-          echo "PR number: ${{ needs.validate-input.outputs.pr_number }}"
-          echo "Commit SHA: ${{ needs.validate-input.outputs.commit_sha }}"
-
       - name: Generate GitHub App token
         id: generate-token
         uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
