@@ -4,14 +4,13 @@ on:
   repository_dispatch:
     types: [deploy-preview]
 
-permissions:
-  contents: read
-  # Explicitly deny other permissions
+permissions: {} # No permissions by default on workflow level
 
 jobs:
   validate-input:
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: read
     steps:
       - name: Validate input
         env:
@@ -55,7 +54,6 @@ jobs:
           fi
 
           echo "✅ Sender authenticated"
-          echo ""
 
           # Validate payload structure and format
           REQUIRED_FIELDS=("source_repo" "pr_number" "commit_sha")
@@ -83,7 +81,6 @@ jobs:
           fi
 
           echo "✅ Payload structure validated"
-          echo ""
 
           # Validate source repository allowlist
           APPROVED_REPO="AlexanderBarabanov/openvino.genai"
@@ -92,18 +89,13 @@ jobs:
             echo "Error: Repository '$SOURCE_REPO' not approved (expected: $APPROVED_REPO)"
             exit 1
           fi
-
           echo "✅ Source repository validated"
-          echo ""
 
           # Verify commit SHA with GitHub API
-          echo "Verifying commit $COMMIT_SHA in $SOURCE_REPO..."
-
           if ! gh api "repos/$SOURCE_REPO/commits/$COMMIT_SHA" --silent 2>/dev/null; then
             echo "Error: Commit SHA does not exist in repository"
             exit 1
           fi
-
           echo "✅ Commit exists"
 
           # Verify PR and commit match
@@ -125,8 +117,8 @@ jobs:
             echo "Error: PR #$PR_NUM is not open (state: $PR_STATE)"
             exit 1
           fi
-
           echo "✅ Commit verified in PR #$PR_NUM"
+
           echo ""
           echo "=== All Validations Passed ==="
           echo "Repository: $SOURCE_REPO"
