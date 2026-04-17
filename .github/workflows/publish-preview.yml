@@ -6,6 +6,12 @@ on:
 
 permissions: {} # No permissions by default on workflow level
 
+environment:
+  # Might be need to be in secrets based on who has access to the repository
+  DEV_ROLE: 'arn:aws:iam::935436532682:role/github-uploader-935436532682-edocspreview-use1'
+  DEV_BUCKET: 's3://935436532682-edocspreview-use1'
+  DEV_URL: 'https://edge-platform-docs-preview.geti.infra-host.com'
+
 jobs:
   validate-input:
     runs-on: ubuntu-latest
@@ -192,6 +198,9 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Install git lfs
+        run: sudo apt-get update && sudo apt-get install -y git-lfs
+
       - name: Checkout source repository at commit SHA
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -200,13 +209,26 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           path: source-repo
           persist-credentials: false
+          lfs: true
 
       - name: Build docs
         run: |
-          cd source-repo
+          # We assume the documentation site is in a "site" folder in the root of the repo and that it can be built with npm install + npm run build, this may need to be adjusted based on how the actual repos are structured and how the docs are built
+          cd source-repo/site
           ls -la
           echo "Checked out successfully"
           echo "Building...."
+          # Shall we change baseUrl in docusaurus.config.ts?
+          npm install
+          npm run build
+          echo "Build completed successfully"
+          DEST_DIR="${GITHUB_WORKSPACE}/docs/${{ needs.validate-input.outputs.repo_name }}"
+          mkdir -p "${DEST_DIR}"
+          cp -pR build/* "${DEST_DIR}"
+          # TODO: do we need to build whole site or can we just build the relevant section? Depends on how the site is structured and if there are shared dependencies
+          # between products. Potentially we would need to loop through all products, build them separately and copy the relevant section to the right place in the preview site structure
+          #
+          # When closing PR in the source repo, we should also make sure to remove the preview site for that PR, this can be done in the cleanup workflow that is triggered on PR close event
 
   update-comment-success:
     runs-on: ubuntu-latest
