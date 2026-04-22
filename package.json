@@ -28,7 +28,8 @@
     "typescript": "5.7.3"
   },
   "overrides": {
-    "serialize-javascript": "^7.0.3"
+    "serialize-javascript": "^7.0.3",
+    "webpackbar": "^7.0.0"
   },
   "browserslist": {
     "production": [">0.5%", "not dead", "not op_mini all"],
