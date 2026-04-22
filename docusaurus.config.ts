@@ -69,8 +69,15 @@ const config: Config = {
     [
       'classic',
       {
-        // Docs provided by spoke plugins below; disable the default instance
-        docs: false,
+        // Use the first spoke as the default docs instance.
+        // Additional spokes are registered as separate plugin-content-docs below.
+        docs: spokes[0]
+          ? {
+              path: path.join('spokes', spokes[0]._dirName, spokes[0].docsPath),
+              routeBasePath: spokes[0].routeBasePath ?? spokes[0].id,
+              sidebarPath: false,
+            }
+          : false,
         blog: false,
         theme: {
           customCss: './src/css/custom.css',
@@ -93,8 +100,8 @@ const config: Config = {
       });
     }),
 
-    // One docs-plugin instance per spoke
-    ...spokes.map((spoke) => {
+    // Additional spoke docs instances (first spoke is handled by the preset above)
+    ...spokes.slice(1).map((spoke) => {
       const excludeCategories = spoke.excludeSidebarCategories ?? [];
       return [
         '@docusaurus/plugin-content-docs',

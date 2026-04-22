@@ -4,9 +4,7 @@
   "private": true,
   "scripts": {
     "docusaurus": "docusaurus",
-    "prestart": "docusaurus generate-samples-docs",
     "start": "docusaurus start",
-    "prebuild": "docusaurus generate-samples-docs",
     "build": "docusaurus build",
     "clear": "docusaurus clear",
     "serve": "docusaurus serve",
