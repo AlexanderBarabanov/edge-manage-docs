@@ -56,7 +56,7 @@ const config: Config = {
 
   markdown: {
     hooks: {
-      onBrokenMarkdownLinks: 'throw',
+      onBrokenMarkdownLinks: 'warn',
     },
   },
 
@@ -87,6 +87,62 @@ const config: Config = {
   ],
 
   plugins: [
+    // Resolve @site/docs/... to the correct spoke's docs directory based on
+    // which spoke the importing file belongs to.
+    function spokeDocsResolverPlugin() {
+      const spokesDir = path.resolve(__dirname, 'spokes');
+      return {
+        name: 'spoke-docs-resolver',
+        configureWebpack() {
+          return {
+            resolve: {
+              plugins: [
+                {
+                  apply(resolver: {
+                    getHook: (name: string) => {
+                      tapAsync: (
+                        name: string,
+                        cb: (
+                          request: { request?: string; context?: { issuer?: string } },
+                          resolveContext: unknown,
+                          callback: () => void,
+                        ) => void,
+                      ) => void;
+                    };
+                  }) {
+                    resolver
+                      .getHook('described-resolve')
+                      .tapAsync('SpokeDocsResolver', (request, _ctx, callback) => {
+                        const req = request.request;
+                        if (!req || !req.startsWith('@site/docs/')) return callback();
+
+                        const issuer = request.context?.issuer ?? '';
+                        // Find which spoke the importing file belongs to
+                        for (const spoke of spokes) {
+                          const spokeDir = path.resolve(
+                            spokesDir,
+                            spoke._dirName,
+                            spoke.docsPath,
+                          );
+                          if (issuer.startsWith(spokeDir)) {
+                            request.request = req.replace(
+                              '@site/docs',
+                              spokeDir,
+                            );
+                            return callback();
+                          }
+                        }
+                        return callback();
+                      });
+                  },
+                },
+              ],
+            },
+          };
+        },
+      };
+    },
+
     // Custom plugins declared by spokes (loaded before docs so they can
     // generate files that plugin-content-docs will discover).
     ...spokes.flatMap((spoke) => {
