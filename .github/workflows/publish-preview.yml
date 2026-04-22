@@ -24,6 +24,12 @@ jobs:
       pr_number: ${{ steps.validate.outputs.pr_number }}
       commit_sha: ${{ steps.validate.outputs.commit_sha }}
     steps:
+      - name: Checkout hub repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: spokes.yml
+          persist-credentials: false
+
       - name: Validate input
         id: validate
         env:
@@ -95,10 +101,17 @@ jobs:
 
           echo "✅ Payload structure validated"
 
-          # Validate source repository allowlist
-          APPROVED_REPOS=(
-            "AlexanderBarabanov/openvino.genai"
-          )
+          # Validate source repository against spokes.yml
+          if command -v yq &>/dev/null; then
+            APPROVED_REPOS=($(yq -r '.spokes[].repo' spokes.yml))
+          else
+            APPROVED_REPOS=()
+            while IFS= read -r line; do
+              if [[ "$line" =~ repo:\ *(.*) ]]; then
+                APPROVED_REPOS+=("${BASH_REMATCH[1]}")
+              fi
+            done < spokes.yml
+          fi
 
           REPO_APPROVED=false
           for repo in "${APPROVED_REPOS[@]}"; do
@@ -198,37 +211,34 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Install git lfs
-        run: sudo apt-get update && sudo apt-get install -y git-lfs
-
-      - name: Checkout source repository at commit SHA
+      - name: Checkout hub repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: ${{ needs.validate-input.outputs.source_repo }}
-          ref: ${{ needs.validate-input.outputs.commit_sha }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-          path: source-repo
           persist-credentials: false
-          lfs: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Clone all spokes
+        env:
+          SOURCE_REPO: ${{ needs.validate-input.outputs.source_repo }}
+          COMMIT_SHA: ${{ needs.validate-input.outputs.commit_sha }}
+        run: |
+          bash scripts/clone-spokes.sh \
+            --override-repo="$SOURCE_REPO" \
+            --override-ref="$COMMIT_SHA"
 
       - name: Build docs
         run: |
-          # We assume the documentation site is in a "site" folder in the root of the repo and that it can be built with npm install + npm run build, this may need to be adjusted based on how the actual repos are structured and how the docs are built
-          cd source-repo/site
-          ls -la
-          echo "Checked out successfully"
-          echo "Building...."
-          # Shall we change baseUrl in docusaurus.config.ts?
           npm install
           npm run build
           echo "Build completed successfully"
+
           DEST_DIR="${GITHUB_WORKSPACE}/docs/${{ needs.validate-input.outputs.repo_name }}"
           mkdir -p "${DEST_DIR}"
           cp -pR build/* "${DEST_DIR}"
-          # TODO: do we need to build whole site or can we just build the relevant section? Depends on how the site is structured and if there are shared dependencies
-          # between products. Potentially we would need to loop through all products, build them separately and copy the relevant section to the right place in the preview site structure
-          #
-          # When closing PR in the source repo, we should also make sure to remove the preview site for that PR, this can be done in the cleanup workflow that is triggered on PR close event
 
   update-comment-success:
     runs-on: ubuntu-latest

@@ -7,6 +7,9 @@
 # Production
 /build
 
+# Cloned spoke repositories (populated at build time)
+/spokes
+
 # Generated files
 .docusaurus
 .cache-loader
