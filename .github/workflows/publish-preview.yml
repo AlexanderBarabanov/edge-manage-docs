@@ -249,8 +249,7 @@ jobs:
           SITE_URL: ${{ env.DEV_URL }}
           BASE_URL: /pr/${{ needs.validate-input.outputs.pr_number }}
         run: |
-          npm ci
-          npm run build
+          npm install && npm run build
           echo "Build completed successfully"
 
       - name: Configure AWS Credentials
