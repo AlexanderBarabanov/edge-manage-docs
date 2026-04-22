@@ -4,7 +4,6 @@ import fs from 'fs';
 import type * as Preset from '@docusaurus/preset-classic';
 import type { Config } from '@docusaurus/types';
 import { themes as prismThemes } from 'prism-react-renderer';
-import yaml from 'js-yaml';
 
 // ---------------------------------------------------------------------------
 // Spoke discovery — reads spokes.yml and each spoke's docs.manifest.json
@@ -54,7 +53,12 @@ const config: Config = {
   baseUrl: '/',
 
   onBrokenLinks: 'warn',
-  onBrokenMarkdownLinks: 'throw',
+
+  markdown: {
+    hooks: {
+      onBrokenMarkdownLinks: 'throw',
+    },
+  },
 
   i18n: {
     defaultLocale: 'en',
@@ -211,6 +215,10 @@ const config: Config = {
         hashed: true,
         highlightSearchTermsOnTargetPage: true,
         searchBarShortcutHint: false,
+        indexDocs: true,
+        indexBlog: false,
+        docsRouteBasePath: spokes.map((s) => s.routeBasePath ?? s.id),
+        docsDir: spokes.map((s) => path.join('spokes', s._dirName, s.docsPath)),
       },
     ],
   ],
