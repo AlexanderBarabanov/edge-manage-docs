@@ -3,6 +3,20 @@ name: Deploy Documentation Preview
 on:
   repository_dispatch:
     types: [deploy-preview]
+  workflow_dispatch:
+    inputs:
+      source_repo:
+        description: 'Source repository (owner/repo)'
+        required: true
+        type: string
+      pr_number:
+        description: 'Pull request number'
+        required: true
+        type: string
+      commit_sha:
+        description: 'Commit SHA (40 hex chars)'
+        required: true
+        type: string
 
 permissions: {} # No permissions by default on workflow level
 
@@ -33,9 +47,9 @@ jobs:
         id: validate
         env:
           CLIENT_PAYLOAD: ${{ toJson(github.event.client_payload) }}
-          SOURCE_REPO: ${{ github.event.client_payload.source_repo }}
-          PR_NUM: ${{ github.event.client_payload.pr_number }}
-          COMMIT_SHA: ${{ github.event.client_payload.commit_sha }}
+          SOURCE_REPO: ${{ github.event.client_payload.source_repo || inputs.source_repo }}
+          PR_NUM: ${{ github.event.client_payload.pr_number || inputs.pr_number }}
+          COMMIT_SHA: ${{ github.event.client_payload.commit_sha || inputs.commit_sha }}
           SENDER_LOGIN: ${{ github.event.sender.login }}
           SENDER_ID: ${{ github.event.sender.id }}
           SENDER_TYPE: ${{ github.event.sender.type }}
