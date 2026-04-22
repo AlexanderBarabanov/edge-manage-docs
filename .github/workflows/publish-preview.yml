@@ -6,11 +6,10 @@ on:
 
 permissions: {} # No permissions by default on workflow level
 
-environment:
-  # Might be need to be in secrets based on who has access to the repository
-  DEV_ROLE: 'arn:aws:iam::935436532682:role/github-uploader-935436532682-edocspreview-use1'
-  DEV_BUCKET: 's3://935436532682-edocspreview-use1'
-  DEV_URL: 'https://edge-platform-docs-preview.geti.infra-host.com'
+env:
+  DEV_ROLE: ${{ secrets.DEV_ROLE }}
+  DEV_BUCKET: ${{ secrets.DEV_BUCKET }}
+  DEV_URL: ${{ secrets.DEV_URL }}
 
 jobs:
   validate-input:
