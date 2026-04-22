@@ -1,0 +1,7 @@
+spokes:
+  - repo: AlexanderBarabanov/openvino.genai
+    ref: master
+    paths:
+      - docs/
+      - samples/
+      - docs.manifest.json

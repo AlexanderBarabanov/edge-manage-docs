@@ -1,0 +1,42 @@
+{
+  "name": "edge-manage-docs",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "docusaurus": "docusaurus",
+    "prestart": "docusaurus generate-samples-docs",
+    "start": "docusaurus start",
+    "prebuild": "docusaurus generate-samples-docs",
+    "build": "docusaurus build",
+    "clear": "docusaurus clear",
+    "serve": "docusaurus serve",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@docusaurus/core": "3.9.2",
+    "@docusaurus/preset-classic": "3.9.2",
+    "@easyops-cn/docusaurus-search-local": "0.55.1",
+    "@mdx-js/react": "3.1.1",
+    "clsx": "2.1.1",
+    "js-yaml": "4.1.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@docusaurus/module-type-aliases": "3.9.2",
+    "@docusaurus/tsconfig": "3.9.2",
+    "@docusaurus/types": "3.9.2",
+    "@types/js-yaml": "4.0.9",
+    "typescript": "5.7.3"
+  },
+  "overrides": {
+    "serialize-javascript": "^7.0.3"
+  },
+  "browserslist": {
+    "production": [">0.5%", "not dead", "not op_mini all"],
+    "development": ["last 3 chrome version", "last 3 firefox version", "last 5 safari version"]
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

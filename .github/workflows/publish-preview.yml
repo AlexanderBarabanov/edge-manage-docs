@@ -3,8 +3,27 @@ name: Deploy Documentation Preview
 on:
   repository_dispatch:
     types: [deploy-preview]
+  workflow_dispatch:
+    inputs:
+      source_repo:
+        description: 'Source repository (owner/repo)'
+        required: true
+        type: string
+      pr_number:
+        description: 'Pull request number'
+        required: true
+        type: string
+      commit_sha:
+        description: 'Commit SHA (40 hex chars)'
+        required: true
+        type: string
 
 permissions: {} # No permissions by default on workflow level
+
+env:
+  DEV_ROLE: ${{ secrets.DEV_ROLE }}
+  DEV_BUCKET: ${{ secrets.DEV_BUCKET }}
+  DEV_URL: ${{ secrets.DEV_URL }}
 
 jobs:
   validate-input:
@@ -18,13 +37,19 @@ jobs:
       pr_number: ${{ steps.validate.outputs.pr_number }}
       commit_sha: ${{ steps.validate.outputs.commit_sha }}
     steps:
+      - name: Checkout hub repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: spokes.yml
+          persist-credentials: false
+
       - name: Validate input
         id: validate
         env:
           CLIENT_PAYLOAD: ${{ toJson(github.event.client_payload) }}
-          SOURCE_REPO: ${{ github.event.client_payload.source_repo }}
-          PR_NUM: ${{ github.event.client_payload.pr_number }}
-          COMMIT_SHA: ${{ github.event.client_payload.commit_sha }}
+          SOURCE_REPO: ${{ github.event.client_payload.source_repo || inputs.source_repo }}
+          PR_NUM: ${{ github.event.client_payload.pr_number || inputs.pr_number }}
+          COMMIT_SHA: ${{ github.event.client_payload.commit_sha || inputs.commit_sha }}
           SENDER_LOGIN: ${{ github.event.sender.login }}
           SENDER_ID: ${{ github.event.sender.id }}
           SENDER_TYPE: ${{ github.event.sender.type }}
@@ -89,10 +114,17 @@ jobs:
 
           echo "✅ Payload structure validated"
 
-          # Validate source repository allowlist
-          APPROVED_REPOS=(
-            "AlexanderBarabanov/openvino.genai"
-          )
+          # Validate source repository against spokes.yml
+          if command -v yq &>/dev/null; then
+            APPROVED_REPOS=($(yq -r '.spokes[].repo' spokes.yml))
+          else
+            APPROVED_REPOS=()
+            while IFS= read -r line; do
+              if [[ "$line" =~ repo:\ *(.*) ]]; then
+                APPROVED_REPOS+=("${BASH_REMATCH[1]}")
+              fi
+            done < spokes.yml
+          fi
 
           REPO_APPROVED=false
           for repo in "${APPROVED_REPOS[@]}"; do
@@ -190,23 +222,51 @@ jobs:
       - validate-input
       - post-comment-pre-build
     permissions:
+      id-token: write
       contents: read
     steps:
-      - name: Checkout source repository at commit SHA
+      - name: Checkout hub repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: ${{ needs.validate-input.outputs.source_repo }}
-          ref: ${{ needs.validate-input.outputs.commit_sha }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-          path: source-repo
           persist-credentials: false
 
-      - name: Build docs
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Clone all spokes
+        env:
+          SOURCE_REPO: ${{ needs.validate-input.outputs.source_repo }}
+          COMMIT_SHA: ${{ needs.validate-input.outputs.commit_sha }}
         run: |
-          cd source-repo
-          ls -la
-          echo "Checked out successfully"
-          echo "Building...."
+          bash scripts/clone-spokes.sh \
+            --override-repo="$SOURCE_REPO" \
+            --override-ref="$COMMIT_SHA"
+
+      - name: Build docs
+        env:
+          SITE_URL: ${{ env.DEV_URL }}
+          BASE_URL: /pr/${{ needs.validate-input.outputs.pr_number }}
+        run: |
+          npm ci
+          npm run build
+          echo "Build completed successfully"
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+        with:
+          role-to-assume: ${{ env.DEV_ROLE }}
+          role-session-name: Github
+          aws-region: us-east-1
+
+      - name: Deploy to AWS
+        env:
+          bucket: ${{ env.DEV_BUCKET }}
+          path: pr/${{ needs.validate-input.outputs.pr_number }}
+        run: |
+          set -f
+          aws s3 sync --delete build "$bucket/$path"
 
   update-comment-success:
     runs-on: ubuntu-latest
@@ -237,9 +297,10 @@ jobs:
           COMMIT_SHA: ${{ needs.validate-input.outputs.commit_sha }}
         run: |
           echo "Updating build comment on $SOURCE_REPO PR #$PR_NUM..."
-          PREVIEW_URL="https://preview-pr${PR_NUM}.docs.example.com"
+          PREVIEW_URL="${DEV_URL}/pr/${PR_NUM}/"
           gh pr comment "${PR_NUM}" \
             --repo "${SOURCE_REPO}" \
             --edit-last \
-            --body "✅ Documentation preview deployed successfully for commit \`${COMMIT_SHA:0:7}\`
-                    Preview URL: ${PREVIEW_URL}"
+            --body "✅ Documentation preview deployed for commit \`${COMMIT_SHA:0:7}\`
+
+          Preview: ${PREVIEW_URL}"

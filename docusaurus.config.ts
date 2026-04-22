@@ -1,0 +1,219 @@
+import path from 'path';
+import fs from 'fs';
+
+import type * as Preset from '@docusaurus/preset-classic';
+import type { Config } from '@docusaurus/types';
+import { themes as prismThemes } from 'prism-react-renderer';
+import yaml from 'js-yaml';
+
+// ---------------------------------------------------------------------------
+// Spoke discovery — reads spokes.yml and each spoke's docs.manifest.json
+// ---------------------------------------------------------------------------
+
+type SpokeManifest = {
+  id: string;
+  label: string;
+  docsPath: string;
+  routeBasePath?: string;
+  plugins?: string[];
+  excludeSidebarCategories?: string[];
+};
+
+function discoverSpokes(): SpokeManifest[] {
+  const spokesDir = path.resolve(__dirname, 'spokes');
+  if (!fs.existsSync(spokesDir)) {
+    return [];
+  }
+
+  const manifests: SpokeManifest[] = [];
+  for (const entry of fs.readdirSync(spokesDir)) {
+    const manifestPath = path.join(spokesDir, entry, 'docs.manifest.json');
+    if (fs.existsSync(manifestPath)) {
+      const manifest = JSON.parse(
+        fs.readFileSync(manifestPath, 'utf8')
+      ) as SpokeManifest;
+      manifests.push(manifest);
+    }
+  }
+  return manifests;
+}
+
+const spokes = discoverSpokes();
+
+// ---------------------------------------------------------------------------
+// Docusaurus config
+// ---------------------------------------------------------------------------
+
+const config: Config = {
+  title: 'Edge AI Documentation',
+  favicon: 'img/favicon.png',
+
+  url: 'https://edge-platform-docs.intel.com',
+  baseUrl: '/',
+
+  onBrokenLinks: 'warn',
+  onBrokenMarkdownLinks: 'throw',
+
+  i18n: {
+    defaultLocale: 'en',
+    locales: ['en'],
+  },
+
+  presets: [
+    [
+      'classic',
+      {
+        // Docs provided by spoke plugins below; disable the default instance
+        docs: false,
+        blog: false,
+        theme: {
+          customCss: './src/css/custom.css',
+        },
+      } satisfies Preset.Options,
+    ],
+  ],
+
+  plugins: [
+    // Custom plugins declared by spokes (loaded before docs so they can
+    // generate files that plugin-content-docs will discover).
+    ...spokes.flatMap((spoke) => {
+      if (!spoke.plugins?.length) return [];
+      const spokeRoot = path.join('spokes', spoke.id);
+      return spoke.plugins.map((pluginRel) => {
+        const pluginPath = path.resolve(spokeRoot, spoke.docsPath, pluginRel);
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const pluginFn = require(pluginPath).default ?? require(pluginPath);
+        return [pluginFn, { spokeRoot }] as const;
+      });
+    }),
+
+    // One docs-plugin instance per spoke
+    ...spokes.map((spoke) => {
+      const excludeCategories = spoke.excludeSidebarCategories ?? [];
+      return [
+        '@docusaurus/plugin-content-docs',
+        {
+          id: spoke.id,
+          path: path.join('spokes', spoke.id, spoke.docsPath),
+          routeBasePath: spoke.routeBasePath ?? spoke.id,
+          async sidebarItemsGenerator({
+            defaultSidebarItemsGenerator,
+            ...args
+          }: {
+            defaultSidebarItemsGenerator: (...a: unknown[]) => Promise<unknown[]>;
+            [key: string]: unknown;
+          }) {
+            const sidebarItems = await defaultSidebarItemsGenerator(args);
+            if (excludeCategories.length === 0) {
+              return sidebarItems;
+            }
+            return (sidebarItems as { type?: string; label?: string }[]).filter(
+              (item) => {
+                if (item.type === 'category') {
+                  return !excludeCategories.includes(item.label ?? '');
+                }
+                return true;
+              }
+            );
+          },
+        },
+      ] as const;
+    }),
+  ],
+
+  themeConfig: {
+    colorMode: {
+      disableSwitch: true,
+      defaultMode: 'light',
+    },
+
+    navbar: {
+      title: 'Edge AI Docs',
+      logo: {
+        alt: 'Intel logo',
+        src: 'img/intel-logo.svg',
+      },
+      items: [
+        // Dynamic spoke nav items
+        ...spokes.map((spoke) => ({
+          to: `/${spoke.routeBasePath ?? spoke.id}/`,
+          label: spoke.label,
+          position: 'left' as const,
+        })),
+        {
+          href: 'https://github.com/openvinotoolkit',
+          label: 'GitHub',
+          position: 'right' as const,
+        },
+      ],
+    },
+
+    footer: {
+      style: 'dark',
+      links: [
+        {
+          title: 'OpenVINO',
+          items: [
+            {
+              label: 'OpenVINO™ Documentation',
+              href: 'https://docs.openvino.ai/',
+            },
+            {
+              label: 'Case Studies',
+              href: 'https://www.intel.com/content/www/us/en/internet-of-things/ai-in-production/success-stories.html',
+            },
+          ],
+        },
+        {
+          title: 'Legal',
+          items: [
+            {
+              label: 'Terms of Use',
+              href: 'https://docs.openvino.ai/2026/about-openvino/additional-resources/terms-of-use.html',
+            },
+            {
+              label: 'Responsible AI',
+              href: 'https://www.intel.com/content/www/us/en/artificial-intelligence/responsible-ai.html',
+            },
+          ],
+        },
+        {
+          title: 'Privacy',
+          items: [
+            {
+              label: 'Cookies',
+              href: 'https://www.intel.com/content/www/us/en/privacy/intel-cookie-notice.html',
+            },
+            {
+              label: 'Privacy',
+              href: 'https://www.intel.com/content/www/us/en/privacy/intel-privacy-notice.html',
+            },
+          ],
+        },
+      ],
+      copyright: `Copyright © ${new Date().getFullYear()} Intel Corporation
+                Intel, the Intel logo, and other Intel marks are trademarks of Intel Corporation or its subsidiaries.
+                Other names and brands may be claimed as the property of others.`,
+    },
+
+    prism: {
+      theme: prismThemes.github,
+      darkTheme: prismThemes.dracula,
+    },
+  } satisfies Preset.ThemeConfig,
+
+  themes: [
+    [
+      require.resolve('@easyops-cn/docusaurus-search-local'),
+      {
+        hashed: true,
+        highlightSearchTermsOnTargetPage: true,
+        searchBarShortcutHint: false,
+        // Index all spoke docs instances
+        docsPluginIdForPreferredDoc: spokes[0]?.id,
+      },
+    ],
+  ],
+};
+
+export default config;
