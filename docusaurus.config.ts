@@ -17,6 +17,7 @@ type SpokeManifest = {
   routeBasePath?: string;
   plugins?: string[];
   excludeSidebarCategories?: string[];
+  _dirName: string; // directory name under spokes/
 };
 
 function discoverSpokes(): SpokeManifest[] {
@@ -32,6 +33,7 @@ function discoverSpokes(): SpokeManifest[] {
       const manifest = JSON.parse(
         fs.readFileSync(manifestPath, 'utf8')
       ) as SpokeManifest;
+      manifest._dirName = entry;
       manifests.push(manifest);
     }
   }
@@ -78,7 +80,7 @@ const config: Config = {
     // generate files that plugin-content-docs will discover).
     ...spokes.flatMap((spoke) => {
       if (!spoke.plugins?.length) return [];
-      const spokeRoot = path.join('spokes', spoke.id);
+      const spokeRoot = path.join('spokes', spoke._dirName);
       return spoke.plugins.map((pluginRel) => {
         const pluginPath = path.resolve(spokeRoot, spoke.docsPath, pluginRel);
         // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -94,7 +96,7 @@ const config: Config = {
         '@docusaurus/plugin-content-docs',
         {
           id: spoke.id,
-          path: path.join('spokes', spoke.id, spoke.docsPath),
+          path: path.join('spokes', spoke._dirName, spoke.docsPath),
           routeBasePath: spoke.routeBasePath ?? spoke.id,
           async sidebarItemsGenerator({
             defaultSidebarItemsGenerator,
