@@ -81,7 +81,9 @@ const config: Config = {
       const spokeRoot = path.join('spokes', spoke.id);
       return spoke.plugins.map((pluginRel) => {
         const pluginPath = path.resolve(spokeRoot, spoke.docsPath, pluginRel);
-        return [pluginPath, { spokeRoot }] as const;
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const pluginFn = require(pluginPath).default ?? require(pluginPath);
+        return [pluginFn, { spokeRoot }] as const;
       });
     }),
 
