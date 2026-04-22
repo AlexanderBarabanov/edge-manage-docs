@@ -211,8 +211,6 @@ const config: Config = {
         hashed: true,
         highlightSearchTermsOnTargetPage: true,
         searchBarShortcutHint: false,
-        // Index all spoke docs instances
-        docsPluginIdForPreferredDoc: spokes[0]?.id,
       },
     ],
   ],
