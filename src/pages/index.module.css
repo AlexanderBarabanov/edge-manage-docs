@@ -1,76 +1,49 @@
 .main {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem;
 }
 
 .hero {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 4rem 2rem 3rem;
   text-align: center;
-  background: linear-gradient(135deg, #27317f 0%, #02227c 100%);
-  width: 100%;
+  margin-bottom: 3rem;
 }
 
-.heroTitle {
-  color: #fff;
-  font-size: 2.5rem;
-  margin-bottom: 1rem;
+.hero p {
+  color: var(--ifm-color-emphasis-700);
+  font-size: 1.15rem;
 }
 
-.heroSubtitle {
-  color: rgba(255, 255, 255, 0.85);
-  font-size: 1.25rem;
-  max-width: 600px;
-}
-
-.products {
-  padding: 3rem 2rem;
-  width: 100%;
-  max-width: 1200px;
-}
-
-.productsGrid {
+.grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1.25rem;
 }
 
 .card {
-  display: flex;
-  flex-direction: column;
-  padding: 2rem;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  background: #fff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-  transition: box-shadow 0.2s ease, transform 0.2s ease;
+  display: block;
+  padding: 1.5rem;
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 8px;
   text-decoration: none;
   color: inherit;
+  transition: border-color 0.15s ease, transform 0.15s ease;
 }
 
 .card:hover {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-  transform: translateY(-2px);
+  border-color: var(--ifm-color-primary);
   text-decoration: none;
   color: inherit;
+  transform: translateY(-2px);
 }
 
-.cardTitle {
-  margin-bottom: 0.75rem;
-  color: var(--genai-color-classic-blue, #0054ae);
+.card h2 {
+  margin: 0 0 0.5rem 0;
 }
 
-.cardDescription {
-  flex: 1;
-  color: var(--genai-color-text-secondary, #6a6d75);
-  line-height: 1.6;
-}
-
-.cardLink {
-  color: var(--genai-color-classic-blue, #0054ae);
-  font-weight: 500;
-  margin-top: 1rem;
+.repo {
+  margin: 0;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.85rem;
+  color: var(--ifm-color-emphasis-600);
 }

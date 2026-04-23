@@ -10,11 +10,8 @@
   --global-font-segoe-ui-emoji: 'Segoe UI Emoji';
   --global-font-segoe-ui-symbol: 'Segoe UI Symbol';
 
-  --genai-font-family:
-    var(--global-font-apple-system), var(--global-font-blink-mac-system-font),
+  --genai-font-family: var(--global-font-apple-system), var(--global-font-blink-mac-system-font),
     var(--global-font-segoe-ui), var(--global-font-roboto), var(--global-font-helvetica),
-    var(--global-font-arial), var(--global-font-sans-serif),
-    var(--global-font-apple-color-emoji),
-    var(--global-font-segoe-ui-emoji),
-    var(--global-font-segoe-ui-symbol);
+    var(--global-font-arial), var(--global-font-sans-serif), var(--global-font-apple-color-emoji),
+    var(--global-font-segoe-ui-emoji), var(--global-font-segoe-ui-symbol);
 }
