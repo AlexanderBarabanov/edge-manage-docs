@@ -134,8 +134,14 @@ const config: Config = {
   title: 'Edge Docs Hub',
   favicon: 'img/favicon.png',
 
-  url: 'https://open-edge-platform.github.io',
-  baseUrl: '/',
+  // Production URL of the site. Override per deployment via $SITE_URL —
+  // preview builds (S3 + CloudFront) and GitHub Pages want different values.
+  url: process.env.SITE_URL || 'https://open-edge-platform.github.io',
+  // URL prefix under which the site is served. '/' for production;
+  // '/pr/<N>/' for PR previews served as sub-paths.
+  baseUrl: process.env.BASE_URL
+    ? process.env.BASE_URL.replace(/\/?$/, '/')
+    : '/',
 
   organizationName: 'open-edge-platform',
   projectName: 'edge-manage-docs',

@@ -7,6 +7,13 @@
 #                     [--override-repo=OWNER/NAME --override-ref=REF]
 #                     [--use-local=OWNER/NAME:PATH ...]
 #
+# Environment:
+#   SPOKE_OVERRIDES  Whitespace-separated list of OWNER/NAME:REF specs.
+#                    Equivalent to passing one --override per spec. Useful
+#                    when the script is invoked indirectly (e.g. via an
+#                    `npm run` lifecycle hook) where CLI flags can't be
+#                    threaded through.
+#
 # Options:
 #   --override=OWNER/NAME:REF
 #       Replace the `ref` for a single spoke (branch, tag, or full SHA).
@@ -20,8 +27,8 @@
 #
 # In GitHub Actions this script is driven by a `repository_dispatch` event
 # from each spoke. The spoke's workflow sends its repo, branch, and commit
-# SHA; the hub workflow translates that into a `--override=<repo>:<sha>`
-# argument so the built site reflects the spoke's pre-merge state.
+# SHA; the hub workflow translates that into a `SPOKE_OVERRIDES="<repo>:<sha>"`
+# environment variable so the built site reflects the spoke's pre-merge state.
 #
 set -euo pipefail
 
@@ -56,6 +63,15 @@ for arg in "$@"; do
 done
 if [[ -n "$LEGACY_OVERRIDE_REPO" && -n "$LEGACY_OVERRIDE_REF" ]]; then
   add_override "${LEGACY_OVERRIDE_REPO}:${LEGACY_OVERRIDE_REF}"
+fi
+
+# SPOKE_OVERRIDES env var: whitespace-separated list of OWNER/NAME:REF specs.
+# Lets callers pass overrides through wrappers that don't forward argv
+# (e.g. `npm run build`, whose lifecycle auto-runs `prebuild` with no args).
+if [[ -n "${SPOKE_OVERRIDES:-}" ]]; then
+  for spec in $SPOKE_OVERRIDES; do
+    [[ -n "$spec" ]] && add_override "$spec"
+  done
 fi
 
 lookup_local_override() {
