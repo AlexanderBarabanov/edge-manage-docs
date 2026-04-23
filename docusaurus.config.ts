@@ -78,8 +78,10 @@ function docsPlugin(spoke: SpokeConfig): PluginConfig {
 }
 
 function landingPagePlugin(spoke: SpokeConfig): PluginConfig | null {
-  const landingDir = path.join(spokeCheckoutDir(spoke), 'landing-page');
-  // The landing-page folder is optional per spoke.
+  // Optional landing page lives at `docs/_landing/` inside the spoke — the
+  // leading underscore tells the docs plugin to ignore the folder, so a single
+  // `docs/` tree holds both docs content and the landing page source.
+  const landingDir = path.join(spokeCheckoutDir(spoke), 'docs', '_landing');
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     require('fs').statSync(path.join(REPO_ROOT, landingDir));
