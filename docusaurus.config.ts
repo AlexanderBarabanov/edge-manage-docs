@@ -1,275 +1,179 @@
-import path from 'path';
-import fs from 'fs';
-
 import type * as Preset from '@docusaurus/preset-classic';
-import type { Config } from '@docusaurus/types';
+import type { Config, PluginConfig } from '@docusaurus/types';
+import { readFileSync, realpathSync } from 'node:fs';
+import path from 'node:path';
 import { themes as prismThemes } from 'prism-react-renderer';
+import { load as yamlLoad } from 'js-yaml';
 
-// ---------------------------------------------------------------------------
-// Spoke discovery — reads spokes.yml and each spoke's docs.manifest.json
-// ---------------------------------------------------------------------------
+// This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
 
-type SpokeManifest = {
+type SpokeConfig = {
+  repo: string;
+  ref: string;
   id: string;
-  label: string;
-  docsPath: string;
-  routeBasePath?: string;
-  plugins?: string[];
-  excludeSidebarCategories?: string[];
-  _dirName: string; // directory name under spokes/
+  routeBasePath: string;
+  /** Label shown in the navbar. Defaults to `id`. */
+  label?: string;
+  paths: string[];
 };
 
-function discoverSpokes(): SpokeManifest[] {
-  const spokesDir = path.resolve(__dirname, 'spokes');
-  if (!fs.existsSync(spokesDir)) {
-    return [];
-  }
+type SpokesYml = {
+  spokes: SpokeConfig[];
+};
 
-  const manifests: SpokeManifest[] = [];
-  for (const entry of fs.readdirSync(spokesDir)) {
-    const manifestPath = path.join(spokesDir, entry, 'docs.manifest.json');
-    if (fs.existsSync(manifestPath)) {
-      const manifest = JSON.parse(
-        fs.readFileSync(manifestPath, 'utf8')
-      ) as SpokeManifest;
-      manifest._dirName = entry;
-      manifests.push(manifest);
-    }
+const REPO_ROOT = __dirname;
+const SPOKES_DIR = 'spokes'; // Relative to REPO_ROOT; populated by scripts/clone-spokes.sh.
+
+const spokes: SpokeConfig[] = (
+  yamlLoad(readFileSync(path.join(REPO_ROOT, 'spokes.yml'), 'utf8')) as SpokesYml
+).spokes;
+
+function spokeCheckoutDir(spoke: SpokeConfig): string {
+  // Matches clone-spokes.sh: basename(repo) under spokes/.
+  // Resolve symlinks so webpack's resolve.symlinks behaviour (which
+  // normalises imported paths to their real path) still matches the
+  // `include` list that plugins pass to the MDX loader.
+  const relDir = path.join(SPOKES_DIR, spoke.repo.split('/').pop()!);
+  const absDir = path.join(REPO_ROOT, relDir);
+  try {
+    return path.relative(REPO_ROOT, realpathSync(absDir));
+  } catch {
+    return relDir;
   }
-  return manifests;
 }
 
-const spokes = discoverSpokes();
+function docsPluginId(spoke: SpokeConfig): string {
+  // The first spoke is mounted via the classic preset (pluginId='default') so
+  // theme features that default to pluginId="default" (404 page, search index,
+  // etc.) have a docs instance to bind to.
+  return spoke === spokes[0] ? 'default' : spoke.id;
+}
 
-// ---------------------------------------------------------------------------
-// Docusaurus config
-// ---------------------------------------------------------------------------
+function docsPluginOptions(spoke: SpokeConfig) {
+  const spokeDir = spokeCheckoutDir(spoke);
+  return {
+    path: path.join(spokeDir, 'docs'),
+    routeBasePath: spoke.routeBasePath,
+    sidebarPath: require.resolve('./sidebars/auto.ts'),
+    editUrl: ({ docPath }: { docPath: string }) =>
+      `https://github.com/${spoke.repo}/edit/${spoke.ref}/docs/${docPath}`,
+    async sidebarItemsGenerator({ defaultSidebarItemsGenerator, ...args }: any) {
+      const excludeCategories = args.item.customProps?.excludeCategories as
+        | string[]
+        | undefined;
+      const items = await defaultSidebarItemsGenerator(args);
+      return items.filter(
+        (i: any) =>
+          !(excludeCategories && i.type === 'category' && excludeCategories.includes(i.label)),
+      );
+    },
+  };
+}
+
+function docsPlugin(spoke: SpokeConfig): PluginConfig {
+  return [
+    '@docusaurus/plugin-content-docs',
+    { id: docsPluginId(spoke), ...docsPluginOptions(spoke) },
+  ];
+}
+
+function landingPagePlugin(spoke: SpokeConfig): PluginConfig | null {
+  // Optional landing page lives at `docs/_landing/` inside the spoke — the
+  // leading underscore tells the docs plugin to ignore the folder, so a single
+  // `docs/` tree holds both docs content and the landing page source.
+  const landingDir = path.join(spokeCheckoutDir(spoke), 'docs', '_landing');
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('fs').statSync(path.join(REPO_ROOT, landingDir));
+  } catch {
+    return null;
+  }
+  return [
+    '@docusaurus/plugin-content-pages',
+    {
+      id: `${spoke.id}-landing`,
+      path: landingDir,
+      routeBasePath: spoke.routeBasePath,
+    },
+  ];
+}
+
+function samplesPlugin(spoke: SpokeConfig): PluginConfig | null {
+  // Only wire the samples plugin for the GenAI spoke (it is GenAI-specific).
+  if (spoke.id !== 'genai') return null;
+  const spokeDir = spokeCheckoutDir(spoke);
+  return [
+    require.resolve('./src/plugins/genai-samples-docs-plugin'),
+    {
+      // The spoke's `samples-list` component calls
+      // `usePluginData('genai-samples-docs-plugin')`, which implicitly looks up
+      // the 'default' instance id. Leave `id` unset so Docusaurus assigns it.
+      samplesPath: path.join(spokeDir, 'samples'),
+      docsOutPath: path.join(spokeDir, 'docs', 'samples'),
+      readmeImportBase: `@site/${spokeDir}/samples`,
+      githubBaseUrl: `https://github.com/${spoke.repo}/tree/${spoke.ref}/samples`,
+      docsRouteBase: `/${spoke.routeBasePath}/samples`,
+    },
+  ];
+}
+
+const [firstSpoke, ...otherSpokes] = spokes;
+
+const spokePlugins: PluginConfig[] = [
+  // The first spoke is wired via presets.classic.docs (below), so we only emit
+  // docs plugins for additional spokes.
+  ...otherSpokes.map(docsPlugin),
+  ...spokes.flatMap((spoke) =>
+    [landingPagePlugin(spoke), samplesPlugin(spoke)].filter(
+      (p): p is PluginConfig => p !== null,
+    ),
+  ),
+];
 
 const config: Config = {
-  title: 'Edge AI Documentation',
+  title: 'Edge Docs Hub',
   favicon: 'img/favicon.png',
 
-  url: 'https://edge-platform-docs.intel.com',
-  baseUrl: '/',
+  // Production URL of the site. Override per deployment via $SITE_URL —
+  // preview builds (S3 + CloudFront) and GitHub Pages want different values.
+  url: process.env.SITE_URL || 'https://open-edge-platform.github.io',
+  // URL prefix under which the site is served. '/' for production;
+  // '/pr/<N>/' for PR previews served as sub-paths.
+  baseUrl: process.env.BASE_URL
+    ? process.env.BASE_URL.replace(/\/?$/, '/')
+    : '/',
+
+  organizationName: 'open-edge-platform',
+  projectName: 'edge-manage-docs',
+
+  customFields: {
+    // Exposed to client-side code (e.g. the hub landing page) via
+    // useDocusaurusContext().
+    spokes: spokes.map((s) => ({
+      id: s.id,
+      label: s.label ?? s.id,
+      routeBasePath: s.routeBasePath,
+      repo: s.repo,
+    })),
+  },
 
   onBrokenLinks: 'warn',
+  onBrokenMarkdownLinks: 'warn',
 
-  markdown: {
-    hooks: {
-      onBrokenMarkdownLinks: 'warn',
-    },
-  },
-
-  i18n: {
-    defaultLocale: 'en',
-    locales: ['en'],
-  },
+  i18n: { defaultLocale: 'en', locales: ['en'] },
 
   presets: [
     [
       'classic',
       {
-        // Use the first spoke as the default docs instance.
-        // Additional spokes are registered as separate plugin-content-docs below.
-        docs: spokes[0]
-          ? {
-              path: path.join('spokes', spokes[0]._dirName, spokes[0].docsPath),
-              routeBasePath: spokes[0].routeBasePath ?? spokes[0].id,
-              sidebarPath: false,
-            }
-          : false,
+        docs: docsPluginOptions(firstSpoke),
         blog: false,
-        theme: {
-          customCss: './src/css/custom.css',
-        },
+        theme: { customCss: './src/css/custom.css' },
       } satisfies Preset.Options,
     ],
   ],
 
-  plugins: [
-    // Resolve @site/docs/... to the correct spoke's docs directory based on
-    // which spoke the importing file belongs to.
-    function spokeDocsResolverPlugin() {
-      const spokesDir = path.resolve(__dirname, 'spokes');
-      return {
-        name: 'spoke-docs-resolver',
-        configureWebpack() {
-          return {
-            resolve: {
-              plugins: [
-                {
-                  apply(resolver: {
-                    getHook: (name: string) => {
-                      tapAsync: (
-                        name: string,
-                        cb: (
-                          request: { request?: string; context?: { issuer?: string } },
-                          resolveContext: unknown,
-                          callback: () => void,
-                        ) => void,
-                      ) => void;
-                    };
-                  }) {
-                    resolver
-                      .getHook('described-resolve')
-                      .tapAsync('SpokeDocsResolver', (request, _ctx, callback) => {
-                        const req = request.request;
-                        if (!req || !req.startsWith('@site/docs/')) return callback();
-
-                        const issuer = request.context?.issuer ?? '';
-                        // Find which spoke the importing file belongs to
-                        for (const spoke of spokes) {
-                          const spokeDir = path.resolve(
-                            spokesDir,
-                            spoke._dirName,
-                            spoke.docsPath,
-                          );
-                          if (issuer.startsWith(spokeDir)) {
-                            request.request = req.replace(
-                              '@site/docs',
-                              spokeDir,
-                            );
-                            return callback();
-                          }
-                        }
-                        return callback();
-                      });
-                  },
-                },
-              ],
-            },
-          };
-        },
-      };
-    },
-
-    // Custom plugins declared by spokes (loaded before docs so they can
-    // generate files that plugin-content-docs will discover).
-    ...spokes.flatMap((spoke) => {
-      if (!spoke.plugins?.length) return [];
-      const spokeRoot = path.join('spokes', spoke._dirName);
-      return spoke.plugins.map((pluginRel) => {
-        const pluginPath = path.resolve(spokeRoot, spoke.docsPath, pluginRel);
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const pluginFn = require(pluginPath).default ?? require(pluginPath);
-        return [pluginFn, { spokeRoot }] as const;
-      });
-    }),
-
-    // Additional spoke docs instances (first spoke is handled by the preset above)
-    ...spokes.slice(1).map((spoke) => {
-      const excludeCategories = spoke.excludeSidebarCategories ?? [];
-      return [
-        '@docusaurus/plugin-content-docs',
-        {
-          id: spoke.id,
-          path: path.join('spokes', spoke._dirName, spoke.docsPath),
-          routeBasePath: spoke.routeBasePath ?? spoke.id,
-          async sidebarItemsGenerator({
-            defaultSidebarItemsGenerator,
-            ...args
-          }: {
-            defaultSidebarItemsGenerator: (...a: unknown[]) => Promise<unknown[]>;
-            [key: string]: unknown;
-          }) {
-            const sidebarItems = await defaultSidebarItemsGenerator(args);
-            if (excludeCategories.length === 0) {
-              return sidebarItems;
-            }
-            return (sidebarItems as { type?: string; label?: string }[]).filter(
-              (item) => {
-                if (item.type === 'category') {
-                  return !excludeCategories.includes(item.label ?? '');
-                }
-                return true;
-              }
-            );
-          },
-        },
-      ] as const;
-    }),
-  ],
-
-  themeConfig: {
-    colorMode: {
-      disableSwitch: true,
-      defaultMode: 'light',
-    },
-
-    navbar: {
-      title: 'Edge AI Docs',
-      logo: {
-        alt: 'Intel logo',
-        src: 'img/intel-logo.svg',
-      },
-      items: [
-        // Dynamic spoke nav items
-        ...spokes.map((spoke) => ({
-          to: `/${spoke.routeBasePath ?? spoke.id}/`,
-          label: spoke.label,
-          position: 'left' as const,
-        })),
-        {
-          href: 'https://github.com/openvinotoolkit',
-          label: 'GitHub',
-          position: 'right' as const,
-        },
-      ],
-    },
-
-    footer: {
-      style: 'dark',
-      links: [
-        {
-          title: 'OpenVINO',
-          items: [
-            {
-              label: 'OpenVINO™ Documentation',
-              href: 'https://docs.openvino.ai/',
-            },
-            {
-              label: 'Case Studies',
-              href: 'https://www.intel.com/content/www/us/en/internet-of-things/ai-in-production/success-stories.html',
-            },
-          ],
-        },
-        {
-          title: 'Legal',
-          items: [
-            {
-              label: 'Terms of Use',
-              href: 'https://docs.openvino.ai/2026/about-openvino/additional-resources/terms-of-use.html',
-            },
-            {
-              label: 'Responsible AI',
-              href: 'https://www.intel.com/content/www/us/en/artificial-intelligence/responsible-ai.html',
-            },
-          ],
-        },
-        {
-          title: 'Privacy',
-          items: [
-            {
-              label: 'Cookies',
-              href: 'https://www.intel.com/content/www/us/en/privacy/intel-cookie-notice.html',
-            },
-            {
-              label: 'Privacy',
-              href: 'https://www.intel.com/content/www/us/en/privacy/intel-privacy-notice.html',
-            },
-          ],
-        },
-      ],
-      copyright: `Copyright © ${new Date().getFullYear()} Intel Corporation
-                Intel, the Intel logo, and other Intel marks are trademarks of Intel Corporation or its subsidiaries.
-                Other names and brands may be claimed as the property of others.`,
-    },
-
-    prism: {
-      theme: prismThemes.github,
-      darkTheme: prismThemes.dracula,
-    },
-  } satisfies Preset.ThemeConfig,
+  plugins: spokePlugins,
 
   themes: [
     [
@@ -278,13 +182,28 @@ const config: Config = {
         hashed: true,
         highlightSearchTermsOnTargetPage: true,
         searchBarShortcutHint: false,
-        indexDocs: true,
-        indexBlog: false,
-        docsRouteBasePath: spokes.map((s) => s.routeBasePath ?? s.id),
-        docsDir: spokes.map((s) => path.join('spokes', s._dirName, s.docsPath)),
       },
     ],
   ],
+
+  themeConfig: {
+    colorMode: { disableSwitch: true, defaultMode: 'light' },
+    navbar: {
+      title: 'Edge Docs',
+      logo: { alt: 'Intel logo', src: 'img/intel-logo.svg' },
+      items: [
+        { to: '/', label: 'Home', position: 'left' },
+        ...spokes.map((spoke) => ({
+          type: 'docSidebar' as const,
+          sidebarId: 'docs',
+          docsPluginId: docsPluginId(spoke),
+          position: 'left' as const,
+          label: spoke.label ?? spoke.id,
+        })),
+      ],
+    },
+    prism: { theme: prismThemes.github, darkTheme: prismThemes.dracula },
+  } satisfies Preset.ThemeConfig,
 };
 
 export default config;

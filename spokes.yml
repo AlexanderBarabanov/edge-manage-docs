@@ -1,7 +1,9 @@
 spokes:
   - repo: AlexanderBarabanov/openvino.genai
-    ref: master
+    ref: mpryakhin/spoke-impl
+    id: genai
+    routeBasePath: genai
+    label: GenAI
     paths:
       - docs/
       - samples/
-      - docs.manifest.json

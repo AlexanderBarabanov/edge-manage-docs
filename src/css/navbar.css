@@ -1,5 +1,6 @@
 :root {
   --search-local-input-active-border-color: var(--genai-color-white);
+
   --ifm-navbar-link-color: var(--genai-color-text-white);
   --ifm-navbar-link-hover-color: var(--genai-text-color-white-hover);
   --ifm-navbar-link-active-color: var(--genai-color-blue-energy);
@@ -35,7 +36,8 @@
   font-family: var(--genai-font-family);
   color: var(--genai-color-text-white);
   width: 238px;
-  background: #122f84 url('../../static/img/magnifying-glass.svg') no-repeat 0.75rem center / 1rem 1rem;
+  background: #122f84 url('../../static/img/magnifying-glass.svg') no-repeat 0.75rem center / 1rem
+    1rem;
 
   &::placeholder {
     color: var(--genai-color-text-white);
