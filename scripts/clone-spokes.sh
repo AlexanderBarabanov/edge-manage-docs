@@ -3,29 +3,50 @@
 # clone-spokes.sh — Clone spoke repos from spokes.yml into spokes/.
 #
 # Usage:
-#   ./clone-spokes.sh [--override-repo=OWNER/NAME --override-ref=REF]
-#                     [--use-local=OWNER/NAME:PATH]
+#   ./clone-spokes.sh [--override=OWNER/NAME:REF ...]
+#                     [--override-repo=OWNER/NAME --override-ref=REF]
+#                     [--use-local=OWNER/NAME:PATH ...]
 #
 # Options:
+#   --override=OWNER/NAME:REF
+#       Replace the `ref` for a single spoke (branch, tag, or full SHA).
+#       May be passed multiple times — typically once per spoke that the
+#       dispatching repository_dispatch event targets.
 #   --override-repo / --override-ref
-#       Replace the `ref` for a given spoke (e.g. to test a PR branch).
+#       Legacy single-spoke form of the above. Kept for backward compat.
 #   --use-local=OWNER/NAME:PATH
 #       Skip cloning and symlink the spoke checkout to a local working copy
 #       (useful during development). May be passed multiple times.
+#
+# In GitHub Actions this script is driven by a `repository_dispatch` event
+# from each spoke. The spoke's workflow sends its repo, branch, and commit
+# SHA; the hub workflow translates that into a `--override=<repo>:<sha>`
+# argument so the built site reflects the spoke's pre-merge state.
 #
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SPOKES_YML="$ROOT_DIR/spokes.yml"
 
-OVERRIDE_REPO=""
-OVERRIDE_REF=""
+OVERRIDE_REPOS=()
+OVERRIDE_REFS=()
 LOCAL_OVERRIDE_REPOS=()
 LOCAL_OVERRIDE_PATHS=()
+
+add_override() {
+  # $1 = OWNER/NAME:REF
+  local spec="$1"
+  OVERRIDE_REPOS+=("${spec%%:*}")
+  OVERRIDE_REFS+=("${spec#*:}")
+}
+
+LEGACY_OVERRIDE_REPO=""
+LEGACY_OVERRIDE_REF=""
 for arg in "$@"; do
   case "$arg" in
-    --override-repo=*) OVERRIDE_REPO="${arg#*=}" ;;
-    --override-ref=*)  OVERRIDE_REF="${arg#*=}" ;;
+    --override=*)      add_override "${arg#*=}" ;;
+    --override-repo=*) LEGACY_OVERRIDE_REPO="${arg#*=}" ;;
+    --override-ref=*)  LEGACY_OVERRIDE_REF="${arg#*=}" ;;
     --use-local=*)
       spec="${arg#*=}"
       LOCAL_OVERRIDE_REPOS+=("${spec%%:*}")
@@ -33,6 +54,9 @@ for arg in "$@"; do
       ;;
   esac
 done
+if [[ -n "$LEGACY_OVERRIDE_REPO" && -n "$LEGACY_OVERRIDE_REF" ]]; then
+  add_override "${LEGACY_OVERRIDE_REPO}:${LEGACY_OVERRIDE_REF}"
+fi
 
 lookup_local_override() {
   # $1 = repo. Echoes the local path if an override is defined, empty otherwise.
@@ -40,6 +64,18 @@ lookup_local_override() {
   while [[ $i -lt ${#LOCAL_OVERRIDE_REPOS[@]} ]]; do
     if [[ "${LOCAL_OVERRIDE_REPOS[$i]}" == "$repo" ]]; then
       echo "${LOCAL_OVERRIDE_PATHS[$i]}"
+      return
+    fi
+    i=$((i + 1))
+  done
+}
+
+lookup_ref_override() {
+  # $1 = repo. Echoes the override ref if defined, empty otherwise.
+  local repo="$1" i=0
+  while [[ $i -lt ${#OVERRIDE_REPOS[@]} ]]; do
+    if [[ "${OVERRIDE_REPOS[$i]}" == "$repo" ]]; then
+      echo "${OVERRIDE_REFS[$i]}"
       return
     fi
     i=$((i + 1))
@@ -78,9 +114,14 @@ process_spoke() {
     return
   fi
 
-  if [[ "$repo" == "$OVERRIDE_REPO" && -n "$OVERRIDE_REF" ]]; then
-    ref="$OVERRIDE_REF"
-    echo "=== $repo @ $ref (PR override) ==="
+  # --override=<repo>:<ref> replaces the ref declared in spokes.yml for this
+  # spoke. Used by the hub's repository_dispatch workflow to build against a
+  # spoke's PR branch or a specific commit SHA.
+  local override_ref
+  override_ref="$(lookup_ref_override "$repo")"
+  if [[ -n "$override_ref" ]]; then
+    ref="$override_ref"
+    echo "=== $repo @ $ref (override) ==="
   else
     echo "=== $repo @ $ref ==="
   fi
@@ -92,6 +133,8 @@ process_spoke() {
   # we'll pull just the files we checkout below.
   GIT_LFS_SKIP_SMUDGE=1 git clone --filter=blob:none --no-checkout --depth 1 \
     "https://github.com/${repo}.git" "$dest"
+  # `ref` may be a branch, tag, or a commit SHA. GitHub allows fetching
+  # any reachable SHA directly.
   GIT_LFS_SKIP_SMUDGE=1 git -C "$dest" fetch --depth 1 origin "$ref"
 
   if [[ ${#paths[@]} -gt 0 ]]; then

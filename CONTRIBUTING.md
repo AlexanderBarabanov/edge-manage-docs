@@ -228,12 +228,30 @@ The `--use-local` flag can be passed multiple times. It symlinks `spokes/<name>`
 
 ## 4. PR preview of a spoke branch
 
-To build the hub against a specific spoke branch without editing `spokes.yml`:
+To build the hub against a specific spoke branch or commit without editing `spokes.yml`:
 
 ```bash
-./scripts/clone-spokes.sh --override-repo=owner/my-project --override-ref=my-pr-branch
+# branch or tag
+./scripts/clone-spokes.sh --override=owner/my-project:my-pr-branch
+
+# exact commit SHA (e.g. from a repository_dispatch payload)
+./scripts/clone-spokes.sh --override=owner/my-project:bed3e544f5090be69e6a1594f3da24d2d9b6ad9a
+
 npm run build
 ```
+
+`--override` is repeatable, so a dispatch that pins multiple spokes can pass one override per spoke. Unspecified spokes keep their `ref` from `spokes.yml`.
+
+### How the repository_dispatch flow uses it
+
+When a spoke's CI changes docs, the spoke dispatches a `repository_dispatch` event to the hub with its `{ repo, branch, sha }` payload. The hub's preview workflow:
+
+1. Checks out the hub at its default branch.
+2. Builds each `--override=<repo>:<sha>` argument from the dispatch payload (one per spoke targeted by the event). Using the SHA — not the branch name — locks the preview to the exact commit that triggered it.
+3. Runs `./scripts/clone-spokes.sh --override=<repo>:<sha> ...`, which clones that spoke at the given SHA while all other spokes are cloned at their `spokes.yml` ref.
+4. Runs `npm run build` and publishes the resulting `build/` directory to the preview environment.
+
+The hub therefore always builds the full site, with only the dispatching spoke pinned to a pre-merge commit.
 
 ## Build and serve
 
