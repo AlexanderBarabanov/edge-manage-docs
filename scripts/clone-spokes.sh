@@ -20,17 +20,31 @@ SPOKES_YML="$ROOT_DIR/spokes.yml"
 
 OVERRIDE_REPO=""
 OVERRIDE_REF=""
-declare -A LOCAL_OVERRIDES=()
+LOCAL_OVERRIDE_REPOS=()
+LOCAL_OVERRIDE_PATHS=()
 for arg in "$@"; do
   case "$arg" in
     --override-repo=*) OVERRIDE_REPO="${arg#*=}" ;;
     --override-ref=*)  OVERRIDE_REF="${arg#*=}" ;;
     --use-local=*)
       spec="${arg#*=}"
-      LOCAL_OVERRIDES["${spec%%:*}"]="${spec#*:}"
+      LOCAL_OVERRIDE_REPOS+=("${spec%%:*}")
+      LOCAL_OVERRIDE_PATHS+=("${spec#*:}")
       ;;
   esac
 done
+
+lookup_local_override() {
+  # $1 = repo. Echoes the local path if an override is defined, empty otherwise.
+  local repo="$1" i=0
+  while [[ $i -lt ${#LOCAL_OVERRIDE_REPOS[@]} ]]; do
+    if [[ "${LOCAL_OVERRIDE_REPOS[$i]}" == "$repo" ]]; then
+      echo "${LOCAL_OVERRIDE_PATHS[$i]}"
+      return
+    fi
+    i=$((i + 1))
+  done
+}
 
 # Check for required tools.
 command -v git >/dev/null || { echo "git is required" >&2; exit 1; }
@@ -54,8 +68,9 @@ process_spoke() {
   local dest="$ROOT_DIR/spokes/$(basename "$repo")"
 
   # --use-local override: replace the checkout with a symlink to a local path.
-  if [[ -n "${LOCAL_OVERRIDES[$repo]:-}" ]]; then
-    local local_path="${LOCAL_OVERRIDES[$repo]}"
+  local local_path
+  local_path="$(lookup_local_override "$repo")"
+  if [[ -n "$local_path" ]]; then
     echo "=== $repo (local: $local_path) ==="
     rm -rf "$dest"
     ln -s "$local_path" "$dest"
@@ -101,25 +116,6 @@ process_spoke() {
 
   echo "  done → $dest"
 }
-
-while IFS= read -r line; do
-  if [[ "$line" =~ ^[[:space:]]*-[[:space:]]*repo:[[:space:]]*(.*) ]]; then
-    # New spoke entry — process the previous one
-    [[ -n "$CURRENT_REPO" ]] && process_spoke "$CURRENT_REPO" "$CURRENT_REF" "${CURRENT_PATHS[@]}"
-    CURRENT_REPO="${BASH_REMATCH[1]}"
-    CURRENT_REF="master"
-    CURRENT_PATHS=()
-  elif [[ "$line" =~ ^[[:space:]]*ref:[[:space:]]*(.*) ]]; then
-    CURRENT_REF="${BASH_REMATCH[1]}"
-  elif [[ "$line" =~ ^[[:space:]]*-[[:space:]]+(.*) && -n "$CURRENT_REPO" ]]; then
-    CURRENT_PATHS+=("${BASH_REMATCH[1]}")
-  fi
-done < "$SPOKES_YML"
-
-# Process last spoke
-[[ -n "$CURRENT_REPO" ]] && process_spoke "$CURRENT_REPO" "$CURRENT_REF" "${CURRENT_PATHS[@]}"
-
-echo "=== All spokes cloned ==="
 
 while IFS= read -r line; do
   if [[ "$line" =~ ^[[:space:]]*-[[:space:]]*repo:[[:space:]]*(.*) ]]; then
