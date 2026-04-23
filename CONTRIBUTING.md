@@ -4,54 +4,131 @@ This documentation hub aggregates documentation from multiple repositories ("spo
 
 # Spoke Repository
 
-## Repository Structure
+## Spoke Tiers
 
-A spoke repository must have a `docs/` directory at its root containing the documentation content. No Docusaurus configuration, no `package.json`, no framework code.
+Spokes range from trivial (pure Markdown) to rich (landing page + generated docs from source). The hub does not require any particular tier — each feature is opt-in by the spoke's folder layout.
+
+### Tier 1 — Markdown only
+
+The minimum viable spoke: a single `docs/` directory with Markdown files.
 
 ```
 your-repo/
-├── docs/
-│   ├── getting-started/
-│   │   ├── _category_.json
-│   │   ├── img/
-│   │   │   └── diagram.svg
-│   │   └── introduction.md
-│   ├── guides/
-│   │   ├── _category_.json
-│   │   └── setup.mdx
-│   └── reference/
-│       ├── _category_.json
-│       └── api.md
-└── docs.manifest.json
+└── docs/
+    ├── getting-started/
+    │   ├── _category_.json
+    │   └── introduction.md
+    └── guides/
+        ├── _category_.json
+        └── setup.md
 ```
 
-## Content Format
+Suitable when you only need text, code blocks, and images. No TSX, no generators.
 
-### Markdown and MDX
+### Tier 2 — MDX + colocated images
 
-Write documentation in `.md` (plain Markdown) or `.mdx` (Markdown with JSX support). Both are supported.
+Add `.mdx` for interactive content (tabs, admonitions, shared components) and colocate images with the docs that use them.
 
-Spokes that only need text, code blocks, and images should use `.md`. Spokes that need interactive components (tabs, custom widgets) can use `.mdx` and bring their own TSX components or use shared components provided by the hub.
+```
+your-repo/
+└── docs/
+    ├── concepts/
+    │   ├── img/
+    │   │   └── architecture.svg
+    │   └── overview.mdx
+    └── guides/
+        └── setup.mdx
+```
 
-### Sidebar Ordering
+Suitable when you need admonitions, code tabs, and the hub's shared MDX components.
 
-Sidebar structure is auto-generated from the filesystem. Control ordering with:
+### Tier 3 — Custom colocated components
 
-**`_category_.json`** — placed in each directory to define its label and position:
+Place TSX components inside `docs/` in `_`-prefixed folders (the docs plugin ignores them as content but MDX can still import them).
 
+```
+your-repo/
+└── docs/
+    ├── _components/
+    │   └── models-table/
+    │       ├── index.tsx
+    │       └── models.ts
+    └── models/
+        └── index.mdx   // import ModelsTable from '../_components/models-table';
+```
+
+Constraints on colocated components:
+- Use **relative imports only** between spoke-local files.
+- Import only from `@docusaurus/...`, `@theme/...`, `react`, and other packages resolvable from the hub's `node_modules`. Do not import from `@site/src/...` — that path resolves to the hub, not your repo.
+
+### Tier 4 — Landing page
+
+Add a landing page served at the spoke's root URL (e.g. `/genai/`) by placing a `docs/_landing/` folder with an `index.tsx`. Anything under `_landing/` is ignored by the docs plugin and picked up by a `plugin-content-pages` instance the hub wires up automatically.
+
+```
+your-repo/
+└── docs/
+    ├── _landing/
+    │   ├── index.tsx            // → /<routeBasePath>/
+    │   ├── index.module.css
+    │   ├── img/
+    │   │   └── hero.svg
+    │   └── _sections/
+    │       ├── HeroSection/
+    │       └── FeaturesSection/
+    ├── getting-started/
+    │   └── introduction.mdx
+    └── guides/
+```
+
+Link from the landing to docs with relative paths (`getting-started/introduction`) so the spoke works regardless of the hub's `routeBasePath`.
+
+### Tier 5 — Generated docs (samples plugin)
+
+For spokes that want to surface source-code samples as browsable docs, the hub provides a "samples" plugin (currently GenAI-specific). It discovers `samples/<language>/<sample>/` subtrees in the spoke and writes MDX into `docs/samples/` at build time. The generated files are ignored by git in the spoke.
+
+```
+your-repo/
+├── .gitignore                 // /docs/samples/{c,cpp,js,python}/
+├── docs/
+│   ├── _landing/
+│   ├── samples/
+│   │   ├── index.mdx          // hand-written; renders a list of samples
+│   │   ├── _components/
+│   │   │   └── samples-list/  // consumes the plugin's global data
+│   │   ├── c/                 // ← generated at build time, gitignored
+│   │   ├── cpp/
+│   │   ├── js/
+│   │   └── python/
+│   └── use-cases/
+└── samples/
+    ├── c/
+    │   └── text_generation/
+    │       ├── README.md
+    │       └── main.c
+    ├── cpp/
+    ├── js/
+    └── python/
+```
+
+The plugin uses each sample's `README.md` (if present) as the page body and emits a `docLink` per sample so spoke components can link to the generated pages.
+
+## Conventions (apply to all tiers)
+
+### Sidebar ordering
+
+The sidebar is auto-generated from the filesystem. Control it with:
+
+**`_category_.json`** — per directory:
 ```json
 {
   "label": "Getting Started",
   "position": 1,
-  "link": {
-    "type": "generated-index",
-    "description": "Getting started with the product."
-  }
+  "link": { "type": "generated-index" }
 }
 ```
 
-**Frontmatter** — in individual documents to control their position within a category:
-
+**Frontmatter** — per document:
 ```yaml
 ---
 sidebar_position: 2
@@ -59,151 +136,115 @@ sidebar_label: Installation
 ---
 ```
 
-No `sidebars.ts` or `sidebars.json` file is needed or supported in spoke repos.
+No `sidebars.ts` is supported in spoke repos.
+
+### Links between docs
+
+Use **relative paths** between Markdown files:
+
+```markdown
+See the [installation guide](../getting-started/installation.md).
+```
+
+Avoid absolute URL paths (`/genai/...`) — they hard-code the hub's `routeBasePath`. The only place absolute paths are needed is inside TSX components that must work from any URL depth; in that case the hub passes them in via plugin data (see the samples plugin's `docLink`).
 
 ### Images
 
-Colocate images with the documents that reference them. Place images in an `img/` subdirectory next to the Markdown file:
+Colocate images next to the MDX that references them and use relative paths. Avoid a top-level `static/` folder — that conflicts with the hub's static assets.
 
-```
-docs/concepts/
-├── img/
-│   ├── architecture.svg
-│   └── workflow.png
-├── overview.md          → ![Architecture](./img/architecture.svg)
-└── details.md           → ![Workflow](./img/workflow.png)
-```
+### Shared MDX components (provided by the hub)
 
-Use **relative paths only**. Absolute paths (`/img/...`) resolve against the hub's static directory and will break.
-
-### Internal Links
-
-Link between documents using relative paths:
-
-```markdown
-See the [installation guide](../getting-started/installation.md) for details.
-```
-
-Do not use absolute URL paths — they depend on the hub's routing configuration and may change.
-
-## Advanced: Custom Components in MDX
-
-Spokes can include React (TSX) components colocated in their `docs/` directory. This is optional — most spokes won't need it.
-
-### Shared Components
-
-The hub provides globally available components that any spoke can use in MDX without imports:
+Available globally in MDX without an import:
 
 | Component | Purpose |
 |---|---|
 | `Button` | Styled link button |
-| `LanguageTabs` | Tab group with Python / C++ / JavaScript tabs |
-| `TabItemPython`, `TabItemCpp`, `TabItemJS` | Tab items for `LanguageTabs` |
-| `OptimumCLI` | Generates Optimum CLI export commands from props |
+| `LanguageTabs` | Tab group container |
+| `TabItemPython`, `TabItemCpp`, `TabItemJS`, `TabItemC` | Tab items for `LanguageTabs` |
+| `OptimumCLI` | Optimum CLI command generator |
 
-Usage (no `import` statement needed):
+### Git LFS
 
-```mdx
-<LanguageTabs>
-<TabItemPython>
+If your repo stores images via LFS, keep them in LFS — the hub's clone script fetches the required objects. If your repo does not use LFS, nothing to do.
 
-```python
-print("hello")
-```
+### What not to include
 
-</TabItemPython>
-<TabItemCpp>
-
-```cpp
-std::cout << "hello";
-```
-
-</TabItemCpp>
-</LanguageTabs>
-```
-
-### Colocated Components
-
-Spokes that need custom rendering (tables, interactive widgets) can place TSX files inside `docs/`:
-
-```
-docs/models/
-├── _components/
-│   └── models-table/
-│       ├── index.tsx
-│       └── models.ts
-└── index.mdx   → import ModelsTable from './_components/models-table';
-```
-
-Constraints on colocated components:
-- Use **relative imports only** between colocated files
-- Use only `@docusaurus/Link`, `@theme/Heading`, and other Docusaurus built-in packages
-- **Do not** import from `@site/src/...` — that path resolves to the hub, not your repo
-
-## `docs.manifest.json`
-
-Every spoke repository must have a `docs.manifest.json` at its root.
-
-### Required Fields
-
-```json
-{
-  "id": "my-project",
-  "label": "My Project",
-  "docsPath": "docs"
-}
-```
-
-| Field | Type | Description |
-|---|---|---|
-| `id` | string | Unique identifier. Lowercase, hyphens only (`^[a-z0-9-]+$`). Used in URLs and build paths. |
-| `label` | string | Display name shown in navigation. |
-| `docsPath` | string | Path to docs directory relative to repo root. |
-
-### Optional Fields
-
-```json
-{
-  "id": "my-project",
-  "label": "My Project",
-  "docsPath": "docs",
-  "routeBasePath": "my-project",
-  "requiredSharedComponents": ["Button", "LanguageTabs"],
-  "preBuild": {
-    "type": "generate-samples",
-    "samplesPath": "samples"
-  },
-  "sparseCheckoutPaths": ["docs/", "samples/", "docs.manifest.json"],
-  "excludeSidebarCategories": ["Internal"]
-}
-```
-
-| Field | Type | Description |
-|---|---|---|
-| `routeBasePath` | string | URL prefix for docs. Defaults to `id`. |
-| `requiredSharedComponents` | string[] | Hub-provided components your MDX uses. Build fails if any are missing — catches breakage early. |
-| `preBuild` | object | Content generation hook. The hub runs this before building. Generated output goes to a temporary build directory, never committed. |
-| `sparseCheckoutPaths` | string[] | Paths to clone. Omit for full clone. Reduces CI time for large repos. |
-| `excludeSidebarCategories` | string[] | Category labels to hide from the sidebar. |
-
-## Connecting to the Hub
-
-To register your spoke:
-
-1. Add `docs/` directory and `docs.manifest.json` to your repository
-2. Request a hub maintainer to add your spoke to `spokes.yml` in the hub repo
-3. For PR previews: add the `trigger-doc-preview.yml` workflow to your repo (template provided by hub maintainers)
-
-## PR Previews
-
-Spoke repositories can trigger documentation preview builds by dispatching a `repository_dispatch` event to the hub. The hub builds the full site with your PR's changes and posts a preview URL as a comment on your PR. See hub maintainers for the workflow template and required secrets.
-
-## What Not to Include
-
-| Don't include | Reason |
+| Don't commit | Why |
 |---|---|
 | `docusaurus.config.ts`, `package.json` | Hub owns the framework |
-| `sidebars.ts` / `sidebars.json` | Sidebar is auto-generated |
-| `src/` with pages, theme, CSS | Hub owns the theme and layout |
-| Generated files | Hub generates at build time; nothing generated should be committed |
-| Images in a top-level `static/` folder | Colocate with docs instead |
+| `sidebars.ts` | Sidebar is auto-generated |
+| `src/pages/`, `src/theme/`, `src/css/` | Hub owns the shell |
+| Generated files (e.g. `docs/samples/{c,cpp,js,python}/`) | Generated by the hub at build time |
+| Top-level `static/` folder | Colocate assets with docs instead |
+
+# Adding a Spoke to the Hub
+
+Spokes are registered in [`spokes.yml`](./spokes.yml). Adding one is a 1–2 step process depending on whether the spoke needs generator plugins.
+
+## 1. Register in `spokes.yml`
+
+```yaml
+spokes:
+  - repo: owner/my-project           # GitHub repo (<owner>/<name>)
+    ref: main                        # branch, tag, or SHA
+    id: my-project                   # unique; used as docs plugin instance id
+    routeBasePath: my-project        # URL prefix → /my-project/
+    label: My Project                # navbar label
+    paths:                           # sparse-checkout list
+      - docs/
+```
+
+| Field | Required | Purpose |
+|---|---|---|
+| `repo` | yes | GitHub `<owner>/<name>`. |
+| `ref` | yes | Branch, tag, or full SHA to clone. |
+| `id` | yes | Docs-plugin instance id. Must be unique across all spokes. The first spoke in the list is mounted as the default instance. |
+| `routeBasePath` | yes | URL path under which the spoke's docs (and landing, if any) are served. |
+| `label` | yes | Text for the navbar entry. |
+| `paths` | yes | Sparse-checkout paths. At minimum `docs/`. Add `samples/` if you use the samples plugin. |
+
+That's it for Tier 1–4 spokes. `npm run build` clones, builds, and serves them.
+
+## 2. Opt in to the samples plugin (Tier 5 only)
+
+The samples plugin is currently GenAI-specific and gated in [`docusaurus.config.ts`](./docusaurus.config.ts) by `spoke.id === 'genai'`. If a new spoke needs it, either:
+
+- Reuse the existing plugin: generalise the guard (`spoke.paths.includes('samples/')`) and ensure your spoke provides a `docs/samples/index.mdx` + a list component consuming the plugin's global data.
+- Add a dedicated plugin under `src/plugins/` for your generator, register it in `docusaurus.config.ts`, and wire an npm script into `gen-samples` (or a new `prebuild` step).
+
+Generated files must be gitignored in the spoke.
+
+## 3. Local development loop
+
+Instead of re-cloning on every change, point the hub at a local working copy:
+
+```bash
+./scripts/clone-spokes.sh --use-local=owner/my-project:/abs/path/to/checkout
+npm run gen-samples    # only if your spoke uses the samples plugin
+npx docusaurus start
+```
+
+The `--use-local` flag can be passed multiple times. It symlinks `spokes/<name>` at the given path and skips git/LFS entirely.
+
+## 4. PR preview of a spoke branch
+
+To build the hub against a specific spoke branch without editing `spokes.yml`:
+
+```bash
+./scripts/clone-spokes.sh --override-repo=owner/my-project --override-ref=my-pr-branch
+npm run build
+```
+
+## Build and serve
+
+From the hub repo:
+
+```bash
+npm install             # once
+npm run build           # prebuild (clone + gen-samples) + docusaurus build
+npm run serve           # serve build/ at http://localhost:3000/
+# or
+npm start               # prebuild + docusaurus start (hot reload)
+```
+
+Requirements: Node 22, `git`, and `git-lfs` if any spoke uses LFS.
