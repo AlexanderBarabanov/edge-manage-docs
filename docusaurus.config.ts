@@ -112,6 +112,7 @@ function samplesPlugin(spoke: SpokeConfig): PluginConfig | null {
       docsOutPath: path.join(spokeDir, 'docs', 'samples'),
       readmeImportBase: `@site/${spokeDir}/samples`,
       githubBaseUrl: `https://github.com/${spoke.repo}/tree/${spoke.ref}/samples`,
+      docsRouteBase: `/${spoke.routeBasePath}/samples`,
     },
   ];
 }

@@ -8,6 +8,7 @@ export type GenAISample = {
   name: string;
   hasReadme: boolean;
   githubLink: string;
+  docLink: string;
 };
 
 export type GenAISamples = {
@@ -29,6 +30,8 @@ export type GenAISamplesDocsPluginOptions = {
   readmeImportBase: string;
   /** Base GitHub URL for "View on GitHub" links, e.g. 'https://github.com/openvinotoolkit/openvino.genai/tree/master/samples'. */
   githubBaseUrl: string;
+  /** Base URL path where the generated sample MDX pages will be served, e.g. '/genai/samples'. */
+  docsRouteBase: string;
 };
 
 const LANGUAGE_TITLES: Record<string, string> = {
@@ -60,6 +63,7 @@ async function findSamples(options: GenAISamplesDocsPluginOptions): Promise<GenA
         name: subdir.name,
         hasReadme,
         githubLink: `${options.githubBaseUrl}/${language}/${subdir.name}`,
+        docLink: `${options.docsRouteBase.replace(/\/$/, '')}/${language}/${subdir.name}`,
       });
     }
   }
