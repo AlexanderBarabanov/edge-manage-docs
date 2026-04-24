@@ -1,33 +1,65 @@
-.main {
+/* Hero ---------------------------------------------------------------- */
+
+.hero {
+  background: linear-gradient(
+    135deg,
+    var(--ifm-color-primary-darkest) 0%,
+    var(--ifm-color-primary) 55%,
+    var(--ifm-color-primary-light) 100%
+  );
+  color: #fff;
+  padding: 5rem 1.5rem 4rem;
+  text-align: center;
+}
+
+.heroInner {
   max-width: 960px;
+  margin: 0 auto;
+}
+
+.heroTitle {
+  color: #fff;
+  font-size: 3rem;
+  line-height: 1.1;
+  margin: 0 0 0.75rem;
+}
+
+.heroTagline {
+  font-size: 1.25rem;
+  line-height: 1.5;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+/* Body / product grid ------------------------------------------------- */
+
+.main {
+  max-width: 1100px;
   margin: 0 auto;
   padding: 4rem 1.5rem;
 }
 
-.hero {
-  text-align: center;
-  margin-bottom: 3rem;
-}
-
-.hero p {
-  color: var(--ifm-color-emphasis-700);
-  font-size: 1.15rem;
+.sectionTitle {
+  font-size: 1.75rem;
+  margin: 0 0 1.5rem;
 }
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 1.25rem;
 }
 
 .card {
-  display: block;
-  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  padding: 1.75rem;
   border: 1px solid var(--ifm-color-emphasis-300);
-  border-radius: 8px;
+  border-radius: 10px;
+  background: var(--ifm-background-surface-color);
   text-decoration: none;
   color: inherit;
-  transition: border-color 0.15s ease, transform 0.15s ease;
+  transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 }
 
 .card:hover {
@@ -35,15 +67,99 @@
   text-decoration: none;
   color: inherit;
   transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
 }
 
-.card h2 {
-  margin: 0 0 0.5rem 0;
+.cardDisabled,
+.cardDisabled:hover {
+  background: var(--ifm-color-emphasis-100);
+  border-style: dashed;
+  transform: none;
+  box-shadow: none;
+  cursor: default;
+}
+
+.cardTitle {
+  margin: 0 0 0.5rem;
+  font-size: 1.35rem;
+}
+
+.cardDescription {
+  margin: 0 0 1rem;
+  color: var(--ifm-color-emphasis-800);
+  line-height: 1.5;
+  flex: 1;
+}
+
+.cardCta {
+  font-weight: 600;
+  color: var(--ifm-color-primary);
+}
+
+.cardBadge {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--ifm-color-emphasis-700);
+  background: var(--ifm-color-emphasis-200);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .repo {
-  margin: 0;
+  margin: 0 0 0.75rem;
   font-family: var(--ifm-font-family-monospace);
+  font-size: 0.8rem;
+  color: var(--ifm-color-emphasis-600);
+}
+
+/* Supported hardware footer ------------------------------------------ */
+
+.hardwareFooter {
+  border-top: 1px solid var(--ifm-color-emphasis-200);
+  background: var(--ifm-color-emphasis-100);
+  padding: 4rem 1.5rem;
+}
+
+.hardwareInner {
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.hardwareLead {
+  margin: 0 0 1.5rem;
+  color: var(--ifm-color-emphasis-700);
+  max-width: 60ch;
+}
+
+.hardwareGrid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.hardwareItem {
+  display: flex;
+  flex-direction: column;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 8px;
+  background: var(--ifm-background-surface-color);
+}
+
+.hardwareName {
+  font-weight: 600;
+  color: var(--ifm-color-emphasis-900);
+}
+
+.hardwareNote {
+  margin-top: 0.15rem;
   font-size: 0.85rem;
   color: var(--ifm-color-emphasis-600);
 }
