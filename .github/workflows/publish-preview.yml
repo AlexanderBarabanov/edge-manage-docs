@@ -341,11 +341,6 @@ jobs:
           SOURCE_REPO: ${{ needs.validate-input.outputs.source_repo }}
           PR_NUM: ${{ needs.validate-input.outputs.pr_number }}
           COMMIT_SHA: ${{ needs.validate-input.outputs.commit_sha }}
-        env:
-          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
-          SOURCE_REPO: ${{ needs.validate-input.outputs.source_repo }}
-          PR_NUM: ${{ needs.validate-input.outputs.pr_number }}
-          COMMIT_SHA: ${{ needs.validate-input.outputs.commit_sha }}
           SPOKE_ID: ${{ needs.validate-input.outputs.spoke_id }}
         run: |
           PREVIEW_URL="${DEV_URL}/pr/${SPOKE_ID}/${PR_NUM}/"
