@@ -7,3 +7,11 @@ spokes:
     paths:
       - docs/
       - samples/
+
+  - repo: ivanzati/openvino
+    ref: ivanzati/spoke-impl
+    id: openvino
+    routeBasePath: openvino
+    label: OpenVINO Toolkit
+    paths:
+      - docs/
