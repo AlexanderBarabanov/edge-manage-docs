@@ -8,8 +8,8 @@ spokes:
       - docs/
       - samples/
 
-  - repo: ivanzati/openvino
-    ref: ivanzati/spoke-impl
+  - repo: AlexanderBarabanov/openvino
+    ref: ivanzati/prepare-unified-docs
     id: openvino
     routeBasePath: openvino
     label: OpenVINO Toolkit
