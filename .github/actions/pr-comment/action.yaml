@@ -1,0 +1,56 @@
+name: PR Comment
+description: |
+  Mint a GitHub App token scoped to the spoke repo and post (or edit) a
+  comment on a PR there. Used to surface preview build status from the hub.
+
+inputs:
+  app_id:
+    description: 'GitHub App ID'
+    required: true
+  private_key:
+    description: 'GitHub App private key'
+    required: true
+  owner:
+    description: 'Spoke repo owner'
+    required: true
+  repo:
+    description: 'Spoke repo name (without owner)'
+    required: true
+  pr_number:
+    description: 'Pull request number'
+    required: true
+  body:
+    description: 'Comment body (markdown)'
+    required: true
+  edit_last:
+    description: 'If "true", edit the most recent comment authored by the app instead of posting a new one.'
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Generate GitHub App token
+      id: token
+      uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+      with:
+        app-id: ${{ inputs.app_id }}
+        private-key: ${{ inputs.private_key }}
+        owner: ${{ inputs.owner }}
+        repositories: ${{ inputs.repo }}
+
+    - name: Post comment
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        SOURCE_REPO: ${{ inputs.owner }}/${{ inputs.repo }}
+        PR_NUM: ${{ inputs.pr_number }}
+        BODY: ${{ inputs.body }}
+        EDIT_LAST: ${{ inputs.edit_last }}
+      run: |
+        set -euo pipefail
+        args=(pr comment "$PR_NUM" --repo "$SOURCE_REPO" --body "$BODY")
+        if [[ "$EDIT_LAST" == "true" ]]; then
+          args+=(--edit-last)
+        fi
+        gh "${args[@]}"

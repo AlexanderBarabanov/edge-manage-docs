@@ -1,0 +1,280 @@
+name: Validate Dispatch
+description: |
+  Validate a dispatch payload (or workflow_dispatch input set), check the
+  source repo against `spokes.yml`, and emit normalised outputs for the
+  caller. Handles three event types:
+    - deploy-preview  (preview/merge mode, used by publish-preview.yml)
+    - publish-release (used by publish-release.yml)
+    - close-preview   (used by close-preview.yml)
+
+  Includes a sparse checkout of `spokes.yml` so callers do not repeat it.
+
+inputs:
+  event_type:
+    description: '`deploy-preview` | `publish-release` | `close-preview`'
+    required: true
+  source_repo:
+    description: 'owner/name of the spoke repo'
+    required: true
+  pr_number:
+    description: 'PR number (deploy-preview, close-preview)'
+    required: false
+    default: ''
+  branch:
+    description: 'Branch name (deploy-preview only). main/master => merge mode.'
+    required: false
+    default: ''
+  commit_sha:
+    description: 'Commit SHA (deploy-preview, publish-release)'
+    required: false
+    default: ''
+  tag:
+    description: 'Release tag vX.Y.Z (publish-release only)'
+    required: false
+    default: ''
+  sender_login:
+    description: 'github.event.sender.login (only checked on repository_dispatch).'
+    required: false
+    default: ''
+  sender_id:
+    description: 'github.event.sender.id'
+    required: false
+    default: ''
+  sender_type:
+    description: 'github.event.sender.type'
+    required: false
+    default: ''
+  is_repository_dispatch:
+    description: 'Set to "true" when the calling workflow was triggered by a repository_dispatch event.'
+    required: false
+    default: 'false'
+  github_token:
+    description: 'Token for the GH API checks (PR/tag/commit existence).'
+    required: true
+
+outputs:
+  source_repo:
+    description: 'Normalised source repo (owner/name)'
+    value: ${{ steps.validate.outputs.source_repo }}
+  repo_owner:
+    description: 'Owner half of source_repo'
+    value: ${{ steps.validate.outputs.repo_owner }}
+  repo_name:
+    description: 'Name half of source_repo'
+    value: ${{ steps.validate.outputs.repo_name }}
+  pr_number:
+    description: 'Validated PR number'
+    value: ${{ steps.validate.outputs.pr_number }}
+  branch:
+    description: 'Validated branch'
+    value: ${{ steps.validate.outputs.branch }}
+  commit_sha:
+    description: 'Validated commit SHA'
+    value: ${{ steps.validate.outputs.commit_sha }}
+  tag:
+    description: 'Validated release tag'
+    value: ${{ steps.validate.outputs.tag }}
+  minor:
+    description: 'vMAJOR.MINOR derived from `tag` (publish-release only)'
+    value: ${{ steps.validate.outputs.minor }}
+  mode:
+    description: '`preview` or `merge` (deploy-preview only)'
+    value: ${{ steps.validate.outputs.mode }}
+  spoke_id:
+    description: 'Spoke id from spokes.yml'
+    value: ${{ steps.validate.outputs.spoke_id }}
+  spoke_route_base_path:
+    description: 'Spoke routeBasePath from spokes.yml'
+    value: ${{ steps.validate.outputs.spoke_route_base_path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout spokes.yml
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        sparse-checkout: spokes.yml
+        persist-credentials: false
+
+    - name: Validate dispatch payload
+      id: validate
+      shell: bash
+      env:
+        EVENT_TYPE: ${{ inputs.event_type }}
+        SOURCE_REPO: ${{ inputs.source_repo }}
+        PR_NUM: ${{ inputs.pr_number }}
+        BRANCH: ${{ inputs.branch }}
+        COMMIT_SHA: ${{ inputs.commit_sha }}
+        TAG: ${{ inputs.tag }}
+        SENDER_LOGIN: ${{ inputs.sender_login }}
+        SENDER_ID: ${{ inputs.sender_id }}
+        SENDER_TYPE: ${{ inputs.sender_type }}
+        IS_REPOSITORY_DISPATCH: ${{ inputs.is_repository_dispatch }}
+        GH_TOKEN: ${{ inputs.github_token }}
+      run: |
+        set -euo pipefail
+        echo "=== Validation Starting (event_type=$EVENT_TYPE) ==="
+
+        # --- Sender authentication (skipped for workflow_dispatch). -------
+        if [[ "$IS_REPOSITORY_DISPATCH" == "true" ]]; then
+          APPROVED_SENDER="test-ov-doc-manager[bot]"
+          APPROVED_SENDER_ID="276340820"
+          APPROVED_SENDER_TYPE="Bot"
+
+          echo "Request from: $SENDER_LOGIN (ID: $SENDER_ID, Type: $SENDER_TYPE)"
+          [[ -n "$SENDER_LOGIN" ]] || { echo "Error: Sender info missing"; exit 1; }
+          [[ "$SENDER_LOGIN" == "$APPROVED_SENDER" ]] || { echo "Error: Sender '$SENDER_LOGIN' not approved"; exit 1; }
+          [[ "$SENDER_ID"    == "$APPROVED_SENDER_ID" ]] || { echo "Error: Sender ID mismatch"; exit 1; }
+          [[ "$SENDER_TYPE"  == "$APPROVED_SENDER_TYPE" ]] || { echo "Error: Sender type mismatch"; exit 1; }
+          echo "✅ Sender authenticated"
+        fi
+
+        # --- Required-field presence per event type. ---------------------
+        require() {
+          local name="$1" value="$2"
+          [[ -n "$value" ]] || { echo "Error: required field '$name' missing for event_type=$EVENT_TYPE"; exit 1; }
+        }
+        require source_repo "$SOURCE_REPO"
+        case "$EVENT_TYPE" in
+          deploy-preview)
+            require pr_number  "$PR_NUM"
+            require branch     "$BRANCH"
+            require commit_sha "$COMMIT_SHA"
+            ;;
+          publish-release)
+            require tag        "$TAG"
+            require commit_sha "$COMMIT_SHA"
+            ;;
+          close-preview)
+            require pr_number  "$PR_NUM"
+            ;;
+          *)
+            echo "Error: unknown event_type '$EVENT_TYPE'"; exit 1
+            ;;
+        esac
+
+        # --- Format checks. -----------------------------------------------
+        [[ "$SOURCE_REPO" =~ ^[a-zA-Z0-9_-]+/[a-zA-Z0-9._-]+$ ]] \
+          || { echo "Error: Invalid repository format: $SOURCE_REPO"; exit 1; }
+        if [[ -n "$PR_NUM" ]]; then
+          [[ "$PR_NUM" =~ ^[0-9]+$ ]] && [[ "$PR_NUM" -ge 1 ]] \
+            || { echo "Error: Invalid PR number: $PR_NUM"; exit 1; }
+        fi
+        if [[ -n "$COMMIT_SHA" ]]; then
+          [[ "$COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]] \
+            || { echo "Error: Invalid commit SHA: $COMMIT_SHA"; exit 1; }
+        fi
+        if [[ -n "$BRANCH" ]]; then
+          [[ "$BRANCH" =~ ^[a-zA-Z0-9._/+-]+$ ]] \
+            || { echo "Error: Invalid branch name: $BRANCH"; exit 1; }
+        fi
+        echo "✅ Payload structure validated"
+
+        # --- Mode derivation (deploy-preview only). -----------------------
+        MODE=""
+        if [[ "$EVENT_TYPE" == "deploy-preview" ]]; then
+          if [[ "$BRANCH" == "main" || "$BRANCH" == "master" ]]; then
+            MODE="merge"
+          else
+            MODE="preview"
+          fi
+          echo "Mode: $MODE"
+        fi
+
+        # --- Tag → minor (publish-release only). --------------------------
+        MINOR=""
+        if [[ "$EVENT_TYPE" == "publish-release" ]]; then
+          if [[ ! "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "Error: Tag '$TAG' does not match required format vMAJOR.MINOR.PATCH"
+            exit 1
+          fi
+          MINOR="v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+        fi
+
+        # --- Spoke lookup from spokes.yml via yq. -------------------------
+        SPOKE_LINE=$(yq -r --arg r "$SOURCE_REPO" \
+          '.spokes[] | select(.repo == $r) | [.id, .routeBasePath] | @tsv' \
+          spokes.yml)
+        if [[ -z "$SPOKE_LINE" ]]; then
+          echo "Error: Repository '$SOURCE_REPO' not in spokes.yml"
+          exit 1
+        fi
+        SPOKE_ID="$(printf '%s' "$SPOKE_LINE" | cut -f1)"
+        SPOKE_RBP="$(printf '%s' "$SPOKE_LINE" | cut -f2)"
+        echo "✅ Source repository validated (spoke=$SPOKE_ID, routeBasePath=$SPOKE_RBP)"
+
+        # --- Per-event GH API checks. -------------------------------------
+        case "$EVENT_TYPE" in
+          deploy-preview)
+            gh api "repos/$SOURCE_REPO/commits/$COMMIT_SHA" --silent \
+              || { echo "Error: Commit SHA does not exist in repository"; exit 1; }
+            echo "✅ Commit exists"
+
+            PR_JSON=$(gh api "repos/$SOURCE_REPO/pulls/$PR_NUM" 2>/dev/null || echo "")
+            [[ -n "$PR_JSON" ]] || { echo "Error: PR #$PR_NUM does not exist"; exit 1; }
+            PR_STATE=$(echo "$PR_JSON" | jq -r '.state')
+            PR_MERGED=$(echo "$PR_JSON" | jq -r '.merged')
+            PR_HEAD_SHA=$(echo "$PR_JSON" | jq -r '.head.sha')
+            PR_MERGE_SHA=$(echo "$PR_JSON" | jq -r '.merge_commit_sha // empty')
+
+            case "$MODE" in
+              preview)
+                [[ "$PR_STATE" == "open" ]] \
+                  || { echo "Error: PR #$PR_NUM is not open (state: $PR_STATE)"; exit 1; }
+                [[ "$PR_HEAD_SHA" == "$COMMIT_SHA" ]] \
+                  || { echo "Error: Commit SHA mismatch (PR head: $PR_HEAD_SHA, received: $COMMIT_SHA)"; exit 1; }
+                echo "✅ Preview commit verified against PR #$PR_NUM head"
+                ;;
+              merge)
+                [[ "$PR_MERGED" == "true" ]] \
+                  || { echo "Error: PR #$PR_NUM has not been merged (merged=$PR_MERGED, state=$PR_STATE)"; exit 1; }
+                # Accept either the merge commit on the default branch OR the
+                # original PR head (squash-merges synthesise a new SHA on the
+                # base branch and orphan the head SHA).
+                if [[ "$COMMIT_SHA" != "$PR_HEAD_SHA" && "$COMMIT_SHA" != "$PR_MERGE_SHA" ]]; then
+                  AHEAD=$(gh api "repos/$SOURCE_REPO/compare/$BRANCH...$COMMIT_SHA" --jq '.ahead_by' 2>/dev/null || echo "")
+                  [[ "$AHEAD" == "0" ]] \
+                    || { echo "Error: Commit $COMMIT_SHA not reachable from $BRANCH and does not match PR head/merge SHA"; exit 1; }
+                fi
+                echo "✅ Merge commit verified against PR #$PR_NUM"
+                ;;
+            esac
+            ;;
+          publish-release)
+            # Verify tag exists and points at the claimed commit.
+            TAG_SHA=$(gh api "repos/$SOURCE_REPO/git/refs/tags/$TAG" --jq '.object.sha' 2>/dev/null || echo "")
+            [[ -n "$TAG_SHA" ]] || { echo "Error: Tag '$TAG' not found in $SOURCE_REPO"; exit 1; }
+            TAG_OBJ_TYPE=$(gh api "repos/$SOURCE_REPO/git/tags/$TAG_SHA" --jq '.object.type' 2>/dev/null || echo "")
+            if [[ "$TAG_OBJ_TYPE" == "commit" ]]; then
+              TAG_COMMIT=$(gh api "repos/$SOURCE_REPO/git/tags/$TAG_SHA" --jq '.object.sha')
+            else
+              TAG_COMMIT="$TAG_SHA"
+            fi
+            [[ "$TAG_COMMIT" == "$COMMIT_SHA" ]] \
+              || { echo "Error: Tag '$TAG' points at $TAG_COMMIT, not $COMMIT_SHA"; exit 1; }
+            echo "✅ Release validated: $SOURCE_REPO@$TAG → $SPOKE_ID/$MINOR/"
+            ;;
+          close-preview)
+            : # No further checks needed; cleanup is keyed solely on PR number + spoke.
+            ;;
+        esac
+
+        # --- Emit outputs. ------------------------------------------------
+        REPO_OWNER="${SOURCE_REPO%/*}"
+        REPO_NAME="${SOURCE_REPO#*/}"
+        {
+          echo "source_repo=$SOURCE_REPO"
+          echo "repo_owner=$REPO_OWNER"
+          echo "repo_name=$REPO_NAME"
+          echo "pr_number=$PR_NUM"
+          echo "branch=$BRANCH"
+          echo "commit_sha=$COMMIT_SHA"
+          echo "tag=$TAG"
+          echo "minor=$MINOR"
+          echo "mode=$MODE"
+          echo "spoke_id=$SPOKE_ID"
+          echo "spoke_route_base_path=$SPOKE_RBP"
+        } >> "$GITHUB_OUTPUT"
+
+        echo ""
+        echo "=== All Validations Passed ==="
