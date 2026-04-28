@@ -176,7 +176,11 @@ jobs:
           # would also work, but pinning by SHA matches the dispatch
           # contract exactly.
           SPOKE_OVERRIDES: ${{ needs.validate-input.outputs.source_repo }}:${{ needs.validate-input.outputs.commit_sha }}
-          ONLY_SPOKE: ${{ needs.validate-input.outputs.spoke_id }}
+          # Restrict clone-spokes.sh to just the spoke being released.
+          # With one spoke checkout on disk the config produces a
+          # single-spoke build, mounted at /, ready to deploy under
+          # <PROD_BUCKET>/<spoke>/<minor>/.
+          ONLY_SPOKES: ${{ needs.validate-input.outputs.spoke_id }}
           SITE_URL: ${{ env.PROD_URL }}
           BASE_URL: /${{ needs.validate-input.outputs.spoke_route_base_path }}/${{ needs.validate-input.outputs.minor }}
         run: npm run build

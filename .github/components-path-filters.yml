@@ -1,0 +1,17 @@
+# Path-filter components consumed by .github/actions/change-detection.
+# Each top-level key is a component; its value is a list of glob patterns
+# (tj-actions/changed-files syntax). A component is "changed" if any of
+# the matched files differ in the current PR/push.
+
+hub:
+  - docusaurus.config.ts
+  - sidebars/**
+  - src/**
+  - static/**
+  - spokes.yml
+  - package.json
+  - package-lock.json
+  - tsconfig.json
+  - .github/workflows/publish-hub.yml
+  - .github/actions/change-detection/**
+  - .github/components-path-filters.yml

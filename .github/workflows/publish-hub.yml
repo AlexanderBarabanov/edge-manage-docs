@@ -1,0 +1,115 @@
+name: Publish Hub
+
+# Publishes the hub root (`/`) to dev or prod. The build is "hub-only":
+# `clone-spokes.sh` is skipped entirely, so docusaurus.config.ts sees zero
+# spoke checkouts on disk and the build emits just the hub landing,
+# 404 page, and shared assets — no spoke trees.
+#
+# Environment is derived from the trigger by the shared setup-deploy
+# action: tag push → prod; anything else → dev.
+#
+# Triggers:
+#   - push to main → run change detection. Build/deploy to dev only when
+#     a hub-owned path changed.
+#   - tag push (refs/tags/*) → build/deploy to prod. Use this to promote
+#     hub changes to production.
+#   - workflow_dispatch → build/deploy to dev. Use to bootstrap an empty
+#     dev bucket without touching files.
+#   - workflow_call from publish-preview.yml's merge mode → republish dev
+#     after a spoke merge (single source of truth for hub publishing).
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+  workflow_call:
+
+permissions: {}
+
+# One hub publish at a time per environment. Tag pushes (prod) never
+# race main pushes (dev) because they hit different concurrency groups.
+concurrency:
+  group: publish-hub-${{ startsWith(github.ref, 'refs/tags/') && 'prod' || 'dev' }}
+  cancel-in-progress: true
+
+jobs:
+  # Trigger-level `paths:` filters skip the whole workflow run, which
+  # makes required-status-check setup brittle. Instead we always start
+  # the workflow and gate the build/deploy job on the shared change-
+  # detection action (paths live in .github/components-path-filters.yml).
+  detect-changes:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      paths_list: ${{ steps.changes.outputs.paths_list }}
+    steps:
+      - name: Checkout hub repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Detect changed components
+        id: changes
+        uses: ./.github/actions/change-detection
+
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    needs: [detect-changes]
+    # Always run except when change detection reports no hub-owned change
+    # on a push to main. Tag pushes, workflow_dispatch, and workflow_call
+    # skip detect-changes, so `result == 'skipped'` runs them.
+    if: |
+      always() &&
+      (needs.detect-changes.result == 'skipped' ||
+       contains(fromJSON(needs.detect-changes.outputs.paths_list || '[]'), 'hub'))
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      # Tag push → prod, anything else → dev. Selecting the secret at
+      # the job-env level keeps secret values out of step outputs.
+      AWS_ROLE: ${{ startsWith(github.ref, 'refs/tags/') && secrets.PROD_ROLE   || secrets.DEV_ROLE }}
+      BUCKET:   ${{ startsWith(github.ref, 'refs/tags/') && secrets.PROD_BUCKET || secrets.DEV_BUCKET }}
+      SITE_URL: ${{ startsWith(github.ref, 'refs/tags/') && secrets.PROD_URL    || secrets.DEV_URL }}
+    steps:
+      - name: Checkout hub repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build hub-only docs
+        # Bypass `npm run build`'s prebuild hook (which clones spokes) and
+        # call docusaurus directly. With no spoke checkouts present the
+        # config emits just the hub root.
+        run: npx docusaurus build
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+        with:
+          role-to-assume: ${{ env.AWS_ROLE }}
+          role-session-name: Github
+          aws-region: us-east-1
+
+      - name: Deploy hub root, preserving spoke trees
+        run: |
+          set -euo pipefail
+          # --delete on the hub root would normally wipe <bucket>/<spoke>/.
+          # Exclude every spoke's routeBasePath (and the dev preview
+          # namespace) so spoke deployments survive.
+          excludes=(--exclude "pr/*")
+          while read -r rbp; do
+            excludes+=(--exclude "${rbp}/*")
+          done < <(yq '.spokes[].routeBasePath' spokes.yml)
+          aws s3 sync --delete build "$BUCKET/" "${excludes[@]}"

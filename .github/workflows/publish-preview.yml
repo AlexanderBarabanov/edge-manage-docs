@@ -12,11 +12,13 @@ name: Publish Documentation (Dev)
 #
 # Mode is derived from `branch`:
 #   - branch ∈ {main, master} → MERGE mode
-#       Single-spoke build (ONLY_SPOKE) deployed to <DEV_BUCKET>/<spoke>/.
-#       The corresponding /pr/<N>/ preview is removed.
+#       Single-spoke build deployed to <DEV_BUCKET>/<spoke>/, the open-PR
+#       preview at /pr/<spoke>/<N>/ is removed, and a chained
+#       `publish-hub` job (workflow_call into publish-hub.yml) republishes
+#       the hub root so the spokes index reflects the new state.
 #   - otherwise              → PREVIEW mode
-#       Full monolithic build with this spoke overridden to <commit_sha>
-#       deployed to <DEV_BUCKET>/pr/<N>/.
+#       Full multi-spoke build with this spoke overridden to <commit_sha>
+#       deployed to <DEV_BUCKET>/pr/<spoke>/<N>/.
 
 on:
   repository_dispatch:
@@ -262,7 +264,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build docs (preview — full monolithic build)
+      - name: Build docs (preview — full multi-spoke build)
         if: needs.validate-input.outputs.mode == 'preview'
         env:
           # clone-spokes.sh reads SPOKE_OVERRIDES so the override survives
@@ -276,9 +278,14 @@ jobs:
 
       - name: Build docs (merge — single-spoke build)
         if: needs.validate-input.outputs.mode == 'merge'
+        # Restrict the clone to the merged spoke; the config sees one
+        # checkout on disk and produces a single-spoke build mounted at /.
+        # The hub root is republished by the downstream `publish-hub` job
+        # (which calls publish-hub.yml — single source of truth for hub
+        # publishing).
         env:
           SPOKE_OVERRIDES: ${{ needs.validate-input.outputs.source_repo }}:${{ needs.validate-input.outputs.commit_sha }}
-          ONLY_SPOKE: ${{ needs.validate-input.outputs.spoke_id }}
+          ONLY_SPOKES: ${{ needs.validate-input.outputs.spoke_id }}
           SITE_URL: ${{ env.DEV_URL }}
           BASE_URL: /${{ needs.validate-input.outputs.spoke_route_base_path }}
         run: npm run build
@@ -299,7 +306,7 @@ jobs:
           set -f
           aws s3 sync --delete build "$bucket/$path"
 
-      - name: Deploy merged docs to <bucket>/<spoke>/ and clean up preview
+      - name: Deploy merged spoke and clean up preview
         if: needs.validate-input.outputs.mode == 'merge'
         env:
           bucket: ${{ env.DEV_BUCKET }}
@@ -309,6 +316,19 @@ jobs:
           set -f
           aws s3 sync --delete build "$bucket/$spoke_path"
           aws s3 rm --recursive "$bucket/$pr_path" || true
+
+  publish-hub:
+    # On merge, republish the hub root through publish-hub.yml so the
+    # spokes index reflects the new spoke deployment. Reusing that
+    # workflow keeps a single source of truth for hub publishing.
+    # publish-hub.yml derives its environment (dev) from the trigger
+    # context, so no inputs are passed here.
+    needs:
+      - validate-input
+      - build-docs
+    if: needs.validate-input.outputs.mode == 'merge' && needs.build-docs.result == 'success'
+    uses: ./.github/workflows/publish-hub.yml
+    secrets: inherit
 
   update-comment-success:
     runs-on: ubuntu-latest

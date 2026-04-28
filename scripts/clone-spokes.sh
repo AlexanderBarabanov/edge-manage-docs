@@ -6,6 +6,7 @@
 #   ./clone-spokes.sh [--override=OWNER/NAME:REF ...]
 #                     [--override-repo=OWNER/NAME --override-ref=REF]
 #                     [--use-local=OWNER/NAME:PATH ...]
+#                     [--only=SPOKE_ID ...]
 #
 # Environment:
 #   SPOKE_OVERRIDES  Whitespace-separated list of OWNER/NAME:REF specs.
@@ -13,6 +14,8 @@
 #                    when the script is invoked indirectly (e.g. via an
 #                    `npm run` lifecycle hook) where CLI flags can't be
 #                    threaded through.
+#   ONLY_SPOKES      Whitespace-separated list of spoke ids. Equivalent to
+#                    passing one --only per id.
 #
 # Options:
 #   --override=OWNER/NAME:REF
@@ -24,6 +27,12 @@
 #   --use-local=OWNER/NAME:PATH
 #       Skip cloning and symlink the spoke checkout to a local working copy
 #       (useful during development). May be passed multiple times.
+#   --only=SPOKE_ID
+#       Restrict cloning to the given spoke id(s) from spokes.yml. When
+#       omitted, all spokes are cloned. Used by the release workflow (which
+#       only needs the spoke being released) and by anyone wanting a hub-
+#       only build (pass `--only=` with no ids, or skip this script entirely).
+#       May be passed multiple times.
 #
 # In GitHub Actions this script is driven by a `repository_dispatch` event
 # from each spoke. The spoke's workflow sends its repo, branch, and commit
@@ -39,6 +48,7 @@ OVERRIDE_REPOS=()
 OVERRIDE_REFS=()
 LOCAL_OVERRIDE_REPOS=()
 LOCAL_OVERRIDE_PATHS=()
+ONLY_IDS=()
 
 add_override() {
   # $1 = OWNER/NAME:REF
@@ -59,6 +69,10 @@ for arg in "$@"; do
       LOCAL_OVERRIDE_REPOS+=("${spec%%:*}")
       LOCAL_OVERRIDE_PATHS+=("${spec#*:}")
       ;;
+    --only=*)
+      id="${arg#*=}"
+      [[ -n "$id" ]] && ONLY_IDS+=("$id")
+      ;;
   esac
 done
 if [[ -n "$LEGACY_OVERRIDE_REPO" && -n "$LEGACY_OVERRIDE_REF" ]]; then
@@ -73,6 +87,24 @@ if [[ -n "${SPOKE_OVERRIDES:-}" ]]; then
     [[ -n "$spec" ]] && add_override "$spec"
   done
 fi
+
+# ONLY_SPOKES env var: whitespace-separated list of spoke ids. Mirrors --only.
+if [[ -n "${ONLY_SPOKES:-}" ]]; then
+  for id in $ONLY_SPOKES; do
+    [[ -n "$id" ]] && ONLY_IDS+=("$id")
+  done
+fi
+
+is_only_id() {
+  # $1 = id. Returns 0 if id is in ONLY_IDS or ONLY_IDS is empty (no filter).
+  [[ ${#ONLY_IDS[@]} -eq 0 ]] && return 0
+  local id="$1" i=0
+  while [[ $i -lt ${#ONLY_IDS[@]} ]]; do
+    [[ "${ONLY_IDS[$i]}" == "$id" ]] && return 0
+    i=$((i + 1))
+  done
+  return 1
+}
 
 lookup_local_override() {
   # $1 = repo. Echoes the local path if an override is defined, empty otherwise.
@@ -109,13 +141,19 @@ mkdir -p "$ROOT_DIR/spokes"
 # Parse spokes.yml line by line
 CURRENT_REPO=""
 CURRENT_REF=""
+CURRENT_ID=""
 CURRENT_PATHS=()
 
 process_spoke() {
-  local repo="$1" ref="$2"
-  shift 2
+  local repo="$1" ref="$2" id="$3"
+  shift 3
   local paths=("$@")
   [[ -z "$repo" ]] && return
+
+  if ! is_only_id "$id"; then
+    echo "=== $repo (id=$id) skipped (not in --only filter) ==="
+    return
+  fi
 
   local dest="$ROOT_DIR/spokes/$(basename "$repo")"
 
@@ -179,18 +217,21 @@ process_spoke() {
 while IFS= read -r line; do
   if [[ "$line" =~ ^[[:space:]]*-[[:space:]]*repo:[[:space:]]*(.*) ]]; then
     # New spoke entry — process the previous one
-    [[ -n "$CURRENT_REPO" ]] && process_spoke "$CURRENT_REPO" "$CURRENT_REF" "${CURRENT_PATHS[@]}"
+    [[ -n "$CURRENT_REPO" ]] && process_spoke "$CURRENT_REPO" "$CURRENT_REF" "$CURRENT_ID" "${CURRENT_PATHS[@]}"
     CURRENT_REPO="${BASH_REMATCH[1]}"
     CURRENT_REF="master"
+    CURRENT_ID=""
     CURRENT_PATHS=()
   elif [[ "$line" =~ ^[[:space:]]*ref:[[:space:]]*(.*) ]]; then
     CURRENT_REF="${BASH_REMATCH[1]}"
+  elif [[ "$line" =~ ^[[:space:]]*id:[[:space:]]*(.*) ]]; then
+    CURRENT_ID="${BASH_REMATCH[1]}"
   elif [[ "$line" =~ ^[[:space:]]*-[[:space:]]+(.*) && -n "$CURRENT_REPO" ]]; then
     CURRENT_PATHS+=("${BASH_REMATCH[1]}")
   fi
 done < "$SPOKES_YML"
 
 # Process last spoke
-[[ -n "$CURRENT_REPO" ]] && process_spoke "$CURRENT_REPO" "$CURRENT_REF" "${CURRENT_PATHS[@]}"
+[[ -n "$CURRENT_REPO" ]] && process_spoke "$CURRENT_REPO" "$CURRENT_REF" "$CURRENT_ID" "${CURRENT_PATHS[@]}"
 
 echo "=== All spokes cloned ==="

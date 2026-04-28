@@ -28,23 +28,32 @@ const allSpokes: SpokeConfig[] = (
   yamlLoad(readFileSync(path.join(REPO_ROOT, 'spokes.yml'), 'utf8')) as SpokesYml
 ).spokes;
 
-// ONLY_SPOKE switches the build into single-spoke mode used by the
-// publish-merge and publish-release workflows. The chosen spoke is mounted
-// at the site root (`/`), the hub root landing page is dropped, and the
-// resulting `build/` is the spoke's docs tree — ready to sync to
-// <bucket>/<spoke>/ or <bucket>/<spoke>/<vX.Y>/ as-is.
-const ONLY_SPOKE = process.env.ONLY_SPOKE?.trim() || '';
-const isSingleSpokeBuild = ONLY_SPOKE !== '';
-
-const spokes: SpokeConfig[] = isSingleSpokeBuild
-  ? allSpokes.filter((s) => s.id === ONLY_SPOKE)
-  : allSpokes;
-
-if (isSingleSpokeBuild && spokes.length === 0) {
-  throw new Error(
-    `ONLY_SPOKE=${ONLY_SPOKE} did not match any spoke in spokes.yml`,
-  );
-}
+// The build mode is derived from what's on disk: a spoke participates in
+// the build iff its checkout exists under spokes/. Each workflow controls
+// the build by controlling what clone-spokes.sh checks out:
+//
+//   0 spoke checkouts → hub-only build (just src/pages/index.tsx + assets)
+//   1 spoke checkout  → single-spoke build (mounted at /, hub root dropped)
+//   N spoke checkouts → multi-spoke build (hub root + each spoke under its
+//                       declared routeBasePath)
+//
+// Used by:
+//   publish-hub.yml      — does not run clone-spokes.sh             → hub-only
+//   publish-preview.yml  — clones all spokes (preview & merge)      → multi-spoke
+//   publish-release.yml  — clones only the released spoke            → single-spoke
+//
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const fs = require('fs') as typeof import('fs');
+const spokes: SpokeConfig[] = allSpokes.filter((s) => {
+  try {
+    fs.statSync(path.join(REPO_ROOT, SPOKES_DIR, s.repo.split('/').pop()!));
+    return true;
+  } catch {
+    return false;
+  }
+});
+const isSingleSpokeBuild = spokes.length === 1;
+const isHubOnlyBuild = spokes.length === 0;
 
 // In single-spoke mode the spoke owns the entire site, so its docs and
 // landing page are mounted at `/` rather than under their declared
@@ -147,7 +156,8 @@ const [firstSpoke, ...otherSpokes] = spokes;
 
 const spokePlugins: PluginConfig[] = [
   // The first spoke is wired via presets.classic.docs (below), so we only emit
-  // docs plugins for additional spokes.
+  // docs plugins for additional spokes. In hub-only builds (no spoke
+  // checkouts) `firstSpoke` is undefined and there's nothing to wire here.
   ...otherSpokes.map(docsPlugin),
   ...spokes.flatMap((spoke) =>
     [landingPagePlugin(spoke), samplesPlugin(spoke)].filter(
@@ -192,7 +202,11 @@ const config: Config = {
     [
       'classic',
       {
-        docs: docsPluginOptions(firstSpoke),
+        // In hub-only builds there are no spoke checkouts to mount docs from,
+        // so we disable the classic preset's docs plugin entirely. The 404
+        // page and other theme features that default to `pluginId="default"`
+        // gracefully degrade when no docs plugin is registered.
+        docs: isHubOnlyBuild ? false : docsPluginOptions(firstSpoke),
         blog: false,
         // In single-spoke builds the hub root landing (src/pages/index.tsx)
         // must not be emitted: the build is deployed under <bucket>/<spoke>/
@@ -206,14 +220,21 @@ const config: Config = {
   plugins: spokePlugins,
 
   themes: [
-    [
-      require.resolve('@easyops-cn/docusaurus-search-local'),
-      {
-        hashed: true,
-        highlightSearchTermsOnTargetPage: true,
-        searchBarShortcutHint: false,
-      },
-    ],
+    // The search theme's <SearchBar> hooks into the docs plugin's global
+    // data. In hub-only builds there's no docs plugin, so we drop the
+    // search theme entirely (the hub landing has no content to search).
+    ...(isHubOnlyBuild
+      ? []
+      : ([
+          [
+            require.resolve('@easyops-cn/docusaurus-search-local'),
+            {
+              hashed: true,
+              highlightSearchTermsOnTargetPage: true,
+              searchBarShortcutHint: false,
+            },
+          ],
+        ] as Config['themes'] & object[])),
   ],
 
   themeConfig: {
@@ -222,11 +243,22 @@ const config: Config = {
       title: 'Edge Docs',
       logo: { alt: 'Intel logo', src: 'img/intel-logo.svg' },
       items: [
-        // The hub-root "Home" link only makes sense for the multi-spoke
-        // bundle. In single-spoke builds the spoke is the entire site.
-        ...(isSingleSpokeBuild
-          ? []
-          : [{ to: '/', label: 'Home', position: 'left' as const }]),
+        // "Home" links back to the hub root. In multi-spoke / hub-only
+        // builds the hub root is part of the same artifact, so a relative
+        // `to: '/'` works. In single-spoke builds the artifact is deployed
+        // under `<bucket>/<spoke>/<vX.Y>/` while the hub still lives at
+        // `<bucket>/`, so we need a literal absolute `/` that doesn't get
+        // prefixed with `baseUrl`. `autoAddBaseUrl: false` is forwarded
+        // by the navbar to `<Link>`, which then emits `<a href="/">`.
+        isSingleSpokeBuild
+          ? {
+              href: '/',
+              prependBaseUrlToHref: false,
+              autoAddBaseUrl: false,
+              label: 'Home',
+              position: 'left' as const,
+            }
+          : { to: '/', label: 'Home', position: 'left' as const },
         ...spokes.map((spoke) => ({
           type: 'docSidebar' as const,
           sidebarId: 'docs',

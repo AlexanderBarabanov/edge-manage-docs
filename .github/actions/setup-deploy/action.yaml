@@ -1,0 +1,69 @@
+name: Setup Deployment Target
+description: |
+  Resolves the deployment environment (dev or prod) and exports the
+  matching AWS role, S3 bucket, and site URL as job-scoped env vars.
+  Environment is derived from the trigger context, never from a workflow
+  input:
+
+    - tag push (refs/tags/*) → prod
+    - anything else          → dev   (PRs, push to main, repository_dispatch,
+                                      workflow_call, workflow_dispatch)
+
+  Composite actions can't read secrets directly, so callers pass all six
+  per-environment secrets as inputs. Only the secret values for the
+  resolved environment are exported, via $GITHUB_ENV (NOT step outputs),
+  so they never leak into workflow_call outputs or other jobs.
+
+inputs:
+  dev_role:
+    required: true
+  dev_bucket:
+    required: true
+  dev_url:
+    required: true
+  prod_role:
+    required: true
+  prod_bucket:
+    required: true
+  prod_url:
+    required: true
+
+outputs:
+  environment:
+    description: 'Resolved environment: dev or prod'
+    value: ${{ steps.resolve.outputs.environment }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve environment and export secrets
+      id: resolve
+      shell: bash
+      env:
+        GITHUB_REF: ${{ github.ref }}
+        DEV_ROLE: ${{ inputs.dev_role }}
+        DEV_BUCKET: ${{ inputs.dev_bucket }}
+        DEV_URL: ${{ inputs.dev_url }}
+        PROD_ROLE: ${{ inputs.prod_role }}
+        PROD_BUCKET: ${{ inputs.prod_bucket }}
+        PROD_URL: ${{ inputs.prod_url }}
+      run: |
+        set -euo pipefail
+        if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+          environment=prod
+          cat >> "$GITHUB_ENV" <<EOF
+        AWS_ROLE=$PROD_ROLE
+        BUCKET=$PROD_BUCKET
+        SITE_URL=$PROD_URL
+        EOF
+        else
+          environment=dev
+          cat >> "$GITHUB_ENV" <<EOF
+        AWS_ROLE=$DEV_ROLE
+        BUCKET=$DEV_BUCKET
+        SITE_URL=$DEV_URL
+        EOF
+        fi
+
+        # Only the non-secret environment label is exposed as an output.
+        echo "environment=$environment" >> "$GITHUB_OUTPUT"
