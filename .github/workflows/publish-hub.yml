@@ -26,12 +26,19 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      hub_changed: ${{ steps.changes.outputs.hub_any_changed }}
+      hub_changed: ${{ steps.decide.outputs.hub_changed }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+      # Path-based gating only makes sense for `push` events — that's the
+      # only trigger where "no relevant files changed in this repo" maps
+      # to "nothing to republish". For `workflow_call` (cross-repo merge
+      # republish driven by publish-preview.yml) and `workflow_dispatch`
+      # (manual reruns), the caller's intent is "republish now", so we
+      # skip detection and always build.
       - id: changes
+        if: github.event_name == 'push'
         uses: tj-actions/changed-files@2f7c5bfce28377bc069a65ba478de0a74aa0ca32 # v46.0.1
         with:
           # Inlined from the former components-path-filters.yml. A change
@@ -48,6 +55,16 @@ jobs:
               - tsconfig.json
               - .github/workflows/publish-hub.yml
               - .github/actions/**
+      - id: decide
+        env:
+          PUSH_RESULT: ${{ steps.changes.outputs.hub_any_changed }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            echo "hub_changed=${PUSH_RESULT}" >> "$GITHUB_OUTPUT"
+          else
+            echo "hub_changed=true" >> "$GITHUB_OUTPUT"
+          fi
 
   build-and-deploy:
     runs-on: ubuntu-latest
