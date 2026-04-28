@@ -79,6 +79,13 @@ jobs:
     env:
       PROD_URL: ${{ secrets.PROD_URL }}
     steps:
+      # Local composite actions can only be resolved after the repo is
+      # checked out. `setup-build` will then redo a full checkout.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions
+          persist-credentials: false
+
       - uses: ./.github/actions/setup-build
 
       - name: Build single-spoke docs at release tag
