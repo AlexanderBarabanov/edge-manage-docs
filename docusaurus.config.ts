@@ -28,19 +28,25 @@ const allSpokes: SpokeConfig[] = (
   yamlLoad(readFileSync(path.join(REPO_ROOT, 'spokes.yml'), 'utf8')) as SpokesYml
 ).spokes;
 
-// The build mode is derived from what's on disk: a spoke participates in
-// the build iff its checkout exists under spokes/. Each workflow controls
-// the build by controlling what clone-spokes.sh checks out:
+// The build mode is derived purely from what's on disk under spokes/:
 //
-//   0 spoke checkouts → hub-only build (just src/pages/index.tsx + assets)
-//   1 spoke checkout  → single-spoke build (mounted at /, hub root dropped)
-//   N spoke checkouts → multi-spoke build (hub root + each spoke under its
-//                       declared routeBasePath)
+//   0 checkouts                          → hub-only build (top-level shell, no spokes;
+//                                          src/pages/index.tsx + 404 + shared assets).
+//   ≥1 checkouts, no `.single-spoke`     → multi-spoke build (hub root + each spoke under
+//                                          its declared routeBasePath). Used for previews.
+//   ≥1 checkouts, `.single-spoke` file   → single-spoke build (the spoke owns `/`, hub
+//                                          root dropped). The marker is written by
+//                                          clone-spokes.sh whenever its clone is
+//                                          restricted (--only / ONLY_SPOKES) and removed
+//                                          on every unrestricted run, so it's purely a
+//                                          filesystem record of how the script was
+//                                          invoked — no env-var coupling at build time.
 //
 // Used by:
-//   publish-hub.yml      — does not run clone-spokes.sh             → hub-only
-//   publish-preview.yml  — clones all spokes (preview & merge)      → multi-spoke
-//   publish-release.yml  — clones only the released spoke            → single-spoke
+//   publish-hub.yml      — does not run clone-spokes.sh                  → hub-only
+//   publish-preview.yml  — preview: clones every spoke                   → multi-spoke
+//   publish-preview.yml  — merge:   clone-spokes.sh --only=<spoke>        → single-spoke
+//   publish-release.yml  — clone-spokes.sh --only=<spoke>                 → single-spoke
 //
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const fs = require('fs') as typeof import('fs');
@@ -52,8 +58,10 @@ const spokes: SpokeConfig[] = allSpokes.filter((s) => {
     return false;
   }
 });
-const isSingleSpokeBuild = spokes.length === 1;
 const isHubOnlyBuild = spokes.length === 0;
+const isSingleSpokeBuild =
+  spokes.length > 0 &&
+  fs.existsSync(path.join(REPO_ROOT, SPOKES_DIR, '.single-spoke'));
 
 // In single-spoke mode the spoke owns the entire site, so its docs and
 // landing page are mounted at `/` rather than under their declared
