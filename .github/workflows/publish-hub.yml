@@ -5,8 +5,7 @@ name: Publish Hub
 # spoke checkouts on disk and the build emits just the hub landing,
 # 404 page, and shared assets — no spoke trees.
 #
-# Environment is derived from the trigger by the shared setup-deploy
-# action: tag push → prod; anything else → dev.
+# Environment is derived from the trigger: tag push → prod; anything else → dev.
 
 on:
   push:
@@ -27,40 +26,44 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      paths_list: ${{ steps.changes.outputs.paths_list }}
+      hub_changed: ${{ steps.changes.outputs.hub_any_changed }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
       - id: changes
-        uses: ./.github/actions/change-detection
+        uses: tj-actions/changed-files@2f7c5bfce28377bc069a65ba478de0a74aa0ca32 # v46.0.1
+        with:
+          # Inlined from the former components-path-filters.yml. A change
+          # to any of these files means the hub root needs republishing.
+          files_yaml: |
+            hub:
+              - docusaurus.config.ts
+              - sidebars/**
+              - src/**
+              - static/**
+              - spokes.yml
+              - package.json
+              - package-lock.json
+              - tsconfig.json
+              - .github/workflows/publish-hub.yml
+              - .github/actions/**
 
   build-and-deploy:
     runs-on: ubuntu-latest
     needs: [detect-changes]
-    if: contains(fromJSON(needs.detect-changes.outputs.paths_list), 'hub')
+    if: needs.detect-changes.outputs.hub_changed == 'true'
     permissions:
       id-token: write
       contents: read
     env:
-      # Tag push → prod, anything else → dev. Selecting the secret at
-      # the job-env level keeps secret values out of step outputs.
+      # Tag push → prod, anything else → dev. Selecting the secret at the
+      # job-env level keeps secret values out of step outputs.
       AWS_ROLE: ${{ startsWith(github.ref, 'refs/tags/') && secrets.PROD_ROLE   || secrets.DEV_ROLE }}
       BUCKET:   ${{ startsWith(github.ref, 'refs/tags/') && secrets.PROD_BUCKET || secrets.DEV_BUCKET }}
       SITE_URL: ${{ startsWith(github.ref, 'refs/tags/') && secrets.PROD_URL    || secrets.DEV_URL }}
     steps:
-      - name: Checkout hub repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Install dependencies
-        run: npm ci
+      - uses: ./.github/actions/setup-build
 
       - name: Build hub-only docs
         # Bypass `npm run build`'s prebuild hook (which clones spokes) and
@@ -68,21 +71,23 @@ jobs:
         # config emits just the hub root.
         run: npx docusaurus build
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
-        with:
-          role-to-assume: ${{ env.AWS_ROLE }}
-          role-session-name: Github
-          aws-region: us-east-1
-
-      - name: Deploy hub root, preserving spoke trees
+      - name: Build excludes for hub-root sync
+        id: excludes
         run: |
           set -euo pipefail
           # --delete on the hub root would normally wipe <bucket>/<spoke>/.
           # Exclude every spoke's routeBasePath (and the dev preview
           # namespace) so spoke deployments survive.
-          excludes=(--exclude "pr/*")
-          while read -r rbp; do
-            excludes+=(--exclude "${rbp}/*")
-          done < <(yq '.spokes[].routeBasePath' spokes.yml)
-          aws s3 sync --delete build "$BUCKET/" "${excludes[@]}"
+          {
+            echo "patterns<<EOF"
+            echo "pr/*"
+            yq -r '.spokes[].routeBasePath | . + "/*"' spokes.yml
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Deploy hub root, preserving spoke trees
+        uses: ./.github/actions/aws-deploy
+        with:
+          role: ${{ env.AWS_ROLE }}
+          bucket: ${{ env.BUCKET }}
+          excludes: ${{ steps.excludes.outputs.patterns }}
