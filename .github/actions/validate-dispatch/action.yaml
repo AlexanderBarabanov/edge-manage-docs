@@ -193,8 +193,8 @@ runs:
         fi
 
         # --- Spoke lookup from spokes.yml via yq. -------------------------
-        SPOKE_LINE=$(yq -r --arg r "$SOURCE_REPO" \
-          '.spokes[] | select(.repo == $r) | [.id, .routeBasePath] | @tsv' \
+        SPOKE_LINE=$(SOURCE_REPO="$SOURCE_REPO" yq -r \
+          '.spokes[] | select(.repo == strenv(SOURCE_REPO)) | .id + "\t" + .routeBasePath' \
           spokes.yml)
         if [[ -z "$SPOKE_LINE" ]]; then
           echo "Error: Repository '$SOURCE_REPO' not in spokes.yml"
