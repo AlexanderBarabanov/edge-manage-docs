@@ -12,11 +12,13 @@ name: Publish Documentation (Dev)
 #
 # Mode is derived from `branch`:
 #   - branch ∈ {main, master} → MERGE mode
-#       Single-spoke build (ONLY_SPOKE) deployed to <DEV_BUCKET>/<spoke>/.
-#       The corresponding /pr/<N>/ preview is removed.
+#       Single-spoke build deployed to <DEV_BUCKET>/<spoke>/, the open-PR
+#       preview at /pr/<spoke>/<N>/ is removed, and a chained
+#       `publish-hub` job (workflow_call into publish-hub.yml) republishes
+#       the hub root so the spokes index reflects the new state.
 #   - otherwise              → PREVIEW mode
-#       Full monolithic build with this spoke overridden to <commit_sha>
-#       deployed to <DEV_BUCKET>/pr/<N>/.
+#       Full multi-spoke build with this spoke overridden to <commit_sha>
+#       deployed to <DEV_BUCKET>/pr/<spoke>/<N>/.
 
 on:
   repository_dispatch:
@@ -40,18 +42,13 @@ on:
         required: true
         type: string
 
-permissions: {} # No permissions by default on workflow level
+permissions: {}
 
 # Serialise dev-bucket writes for the same spoke so a merge-mode deploy
 # never races a preview-mode deploy of the same PR.
 concurrency:
   group: publish-dev-${{ github.event.client_payload.source_repo || inputs.source_repo }}-${{ github.event.client_payload.pr_number || inputs.pr_number }}
   cancel-in-progress: false
-
-env:
-  DEV_ROLE: ${{ secrets.DEV_ROLE }}
-  DEV_BUCKET: ${{ secrets.DEV_BUCKET }}
-  DEV_URL: ${{ secrets.DEV_URL }}
 
 jobs:
   validate-input:
@@ -69,140 +66,25 @@ jobs:
       spoke_id: ${{ steps.validate.outputs.spoke_id }}
       spoke_route_base_path: ${{ steps.validate.outputs.spoke_route_base_path }}
     steps:
-      - name: Checkout hub repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          sparse-checkout: spokes.yml
+          sparse-checkout: .github/actions/validate-dispatch
           persist-credentials: false
+      - id: validate
+        uses: ./.github/actions/validate-dispatch
+        with:
+          event_type: deploy-preview
+          source_repo: ${{ github.event.client_payload.source_repo || inputs.source_repo }}
+          pr_number:   ${{ github.event.client_payload.pr_number   || inputs.pr_number }}
+          branch:      ${{ github.event.client_payload.branch      || inputs.branch }}
+          commit_sha:  ${{ github.event.client_payload.commit_sha  || inputs.commit_sha }}
+          sender_login: ${{ github.event.sender.login }}
+          sender_id:    ${{ github.event.sender.id }}
+          sender_type:  ${{ github.event.sender.type }}
+          is_repository_dispatch: ${{ github.event_name == 'repository_dispatch' }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Validate input
-        id: validate
-        env:
-          CLIENT_PAYLOAD: ${{ toJson(github.event.client_payload) }}
-          SOURCE_REPO: ${{ github.event.client_payload.source_repo || inputs.source_repo }}
-          PR_NUM: ${{ github.event.client_payload.pr_number || inputs.pr_number }}
-          BRANCH: ${{ github.event.client_payload.branch || inputs.branch }}
-          COMMIT_SHA: ${{ github.event.client_payload.commit_sha || inputs.commit_sha }}
-          SENDER_LOGIN: ${{ github.event.sender.login }}
-          SENDER_ID: ${{ github.event.sender.id }}
-          SENDER_TYPE: ${{ github.event.sender.type }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          echo "=== Validation Starting ==="
-
-          # --- Sender authentication (skipped for workflow_dispatch). -------
-          if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
-            APPROVED_SENDER="test-ov-doc-manager[bot]"
-            APPROVED_SENDER_ID="276340820"
-            APPROVED_SENDER_TYPE="Bot"
-
-            echo "Request from: $SENDER_LOGIN (ID: $SENDER_ID, Type: $SENDER_TYPE)"
-            [[ -n "$SENDER_LOGIN" ]] || { echo "Error: Sender info missing"; exit 1; }
-            [[ "$SENDER_LOGIN" == "$APPROVED_SENDER" ]] || { echo "Error: Sender '$SENDER_LOGIN' not approved"; exit 1; }
-            [[ "$SENDER_ID"    == "$APPROVED_SENDER_ID" ]] || { echo "Error: Sender ID mismatch"; exit 1; }
-            [[ "$SENDER_TYPE"  == "$APPROVED_SENDER_TYPE" ]] || { echo "Error: Sender type mismatch"; exit 1; }
-            echo "✅ Sender authenticated"
-
-            for field in source_repo pr_number branch commit_sha; do
-              echo "$CLIENT_PAYLOAD" | jq -e ".$field" > /dev/null \
-                || { echo "Error: Required payload field '$field' missing"; exit 1; }
-            done
-          fi
-
-          # --- Format checks. ----------------------------------------------
-          [[ "$PR_NUM" =~ ^[0-9]+$ ]] && [[ "$PR_NUM" -ge 1 ]] \
-            || { echo "Error: Invalid PR number: $PR_NUM"; exit 1; }
-          [[ "$COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]] \
-            || { echo "Error: Invalid commit SHA: $COMMIT_SHA"; exit 1; }
-          [[ "$SOURCE_REPO" =~ ^[a-zA-Z0-9_-]+/[a-zA-Z0-9._-]+$ ]] \
-            || { echo "Error: Invalid repository format: $SOURCE_REPO"; exit 1; }
-          [[ "$BRANCH" =~ ^[a-zA-Z0-9._/+-]+$ ]] \
-            || { echo "Error: Invalid branch name: $BRANCH"; exit 1; }
-          echo "✅ Payload structure validated"
-
-          # --- Mode (preview vs merge). ------------------------------------
-          if [[ "$BRANCH" == "main" || "$BRANCH" == "master" ]]; then
-            MODE="merge"
-          else
-            MODE="preview"
-          fi
-          echo "Mode: $MODE"
-
-          # --- Spoke lookup from spokes.yml. -------------------------------
-          # Pull both the source_repo allowlist and the (id, routeBasePath)
-          # of the matched spoke in one pass.
-          SPOKE_LINE=$(awk -v repo="$SOURCE_REPO" '
-            /^[[:space:]]*-[[:space:]]*repo:/ { current_repo=""; current_id=""; current_rbp=""
-              n = split($0, a, ":"); gsub(/^[[:space:]]+|[[:space:]]+$/, "", a[2]); current_repo=a[2] }
-            /^[[:space:]]*id:/                 { n = split($0, a, ":"); gsub(/^[[:space:]]+|[[:space:]]+$/, "", a[2]); current_id=a[2] }
-            /^[[:space:]]*routeBasePath:/      { n = split($0, a, ":"); gsub(/^[[:space:]]+|[[:space:]]+$/, "", a[2]); current_rbp=a[2]
-              if (current_repo == repo && current_id != "" && current_rbp != "") { print current_id "|" current_rbp; exit } }
-          ' spokes.yml)
-
-          if [[ -z "$SPOKE_LINE" ]]; then
-            echo "Error: Repository '$SOURCE_REPO' not in spokes.yml"
-            exit 1
-          fi
-          SPOKE_ID="${SPOKE_LINE%%|*}"
-          SPOKE_RBP="${SPOKE_LINE#*|}"
-          echo "✅ Source repository validated (spoke=$SPOKE_ID, routeBasePath=$SPOKE_RBP)"
-
-          # --- Commit existence. -------------------------------------------
-          gh api "repos/$SOURCE_REPO/commits/$COMMIT_SHA" --silent \
-            || { echo "Error: Commit SHA does not exist in repository"; exit 1; }
-          echo "✅ Commit exists"
-
-          # --- PR / branch consistency. ------------------------------------
-          PR_JSON=$(gh api "repos/$SOURCE_REPO/pulls/$PR_NUM" 2>/dev/null || echo "")
-          [[ -n "$PR_JSON" ]] || { echo "Error: PR #$PR_NUM does not exist"; exit 1; }
-          PR_STATE=$(echo "$PR_JSON" | jq -r '.state')
-          PR_MERGED=$(echo "$PR_JSON" | jq -r '.merged')
-          PR_HEAD_SHA=$(echo "$PR_JSON" | jq -r '.head.sha')
-          PR_MERGE_SHA=$(echo "$PR_JSON" | jq -r '.merge_commit_sha // empty')
-
-          case "$MODE" in
-            preview)
-              [[ "$PR_STATE" == "open" ]]      || { echo "Error: PR #$PR_NUM is not open (state: $PR_STATE)"; exit 1; }
-              [[ "$PR_HEAD_SHA" == "$COMMIT_SHA" ]] \
-                || { echo "Error: Commit SHA mismatch (PR head: $PR_HEAD_SHA, received: $COMMIT_SHA)"; exit 1; }
-              echo "✅ Preview commit verified against PR #$PR_NUM head"
-              ;;
-            merge)
-              [[ "$PR_MERGED" == "true" ]] \
-                || { echo "Error: PR #$PR_NUM has not been merged (merged=$PR_MERGED, state=$PR_STATE)"; exit 1; }
-              # Accept either the merge commit on the default branch OR the
-              # original PR head (squash-merges synthesise a new SHA on the
-              # base branch and orphan the head SHA).
-              if [[ "$COMMIT_SHA" != "$PR_HEAD_SHA" && "$COMMIT_SHA" != "$PR_MERGE_SHA" ]]; then
-                # Last-resort: confirm $COMMIT_SHA is reachable from $BRANCH.
-                AHEAD=$(gh api "repos/$SOURCE_REPO/compare/$BRANCH...$COMMIT_SHA" --jq '.ahead_by' 2>/dev/null || echo "")
-                [[ "$AHEAD" == "0" ]] \
-                  || { echo "Error: Commit $COMMIT_SHA not reachable from $BRANCH and does not match PR head/merge SHA"; exit 1; }
-              fi
-              echo "✅ Merge commit verified against PR #$PR_NUM"
-              ;;
-          esac
-
-          REPO_OWNER="${SOURCE_REPO%/*}"
-          REPO_NAME="${SOURCE_REPO#*/}"
-
-          {
-            echo "source_repo=$SOURCE_REPO"
-            echo "repo_owner=$REPO_OWNER"
-            echo "repo_name=$REPO_NAME"
-            echo "pr_number=$PR_NUM"
-            echo "branch=$BRANCH"
-            echo "commit_sha=$COMMIT_SHA"
-            echo "mode=$MODE"
-            echo "spoke_id=$SPOKE_ID"
-            echo "spoke_route_base_path=$SPOKE_RBP"
-          } >> "$GITHUB_OUTPUT"
-
-          echo ""
-          echo "=== All Validations Passed ==="
-
-  post-comment-pre-build:
+  comment-build-starting:
     runs-on: ubuntu-latest
     needs: validate-input
     # No PR comment for merge mode — the PR is closed and a new comment
@@ -212,57 +94,40 @@ jobs:
       contents: read
     environment:
       name: publish-preview
-      deployment: false
     steps:
-      - name: Generate GitHub App token
-        id: generate-token
-        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          app-id: ${{ secrets.DOC_HELPER_APP_ID }}
-          private-key: ${{ secrets.DOC_HELPER_APP_PRIVATE_KEY }}
-          owner: ${{ needs.validate-input.outputs.repo_owner }}
-          repositories: ${{ needs.validate-input.outputs.repo_name }}
+          sparse-checkout: .github/actions/pr-comment
+          persist-credentials: false
+      - uses: ./.github/actions/pr-comment
+        with:
+          app_id:      ${{ secrets.DOC_HELPER_APP_ID }}
+          private_key: ${{ secrets.DOC_HELPER_APP_PRIVATE_KEY }}
+          owner:       ${{ needs.validate-input.outputs.repo_owner }}
+          repo:        ${{ needs.validate-input.outputs.repo_name }}
+          pr_number:   ${{ needs.validate-input.outputs.pr_number }}
+          body: "🔄 Building documentation preview for commit `${{ needs.validate-input.outputs.commit_sha }}`..."
 
-      - name: Post build starting comment
-        env:
-          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
-          SOURCE_REPO: ${{ needs.validate-input.outputs.source_repo }}
-          PR_NUM: ${{ needs.validate-input.outputs.pr_number }}
-          COMMIT_SHA: ${{ needs.validate-input.outputs.commit_sha }}
-        run: |
-          gh pr comment "${PR_NUM}" \
-            --repo "${SOURCE_REPO}" \
-            --body "🔄 Building documentation preview for commit \`${COMMIT_SHA:0:7}\`..."
-
-  build-docs:
+  build-and-deploy:
     runs-on: ubuntu-latest
     needs:
       - validate-input
-      - post-comment-pre-build
-    # post-comment-pre-build is skipped on merge — `always()` lets us still
+      - comment-build-starting
+    # comment-build-starting is skipped on merge — `always()` lets us still
     # depend on the order without the skip propagating.
     if: |
       always() &&
       needs.validate-input.result == 'success' &&
-      (needs.post-comment-pre-build.result == 'success' || needs.post-comment-pre-build.result == 'skipped')
+      (needs.comment-build-starting.result == 'success' || needs.comment-build-starting.result == 'skipped')
     permissions:
       id-token: write
       contents: read
+    env:
+      DEV_URL: ${{ secrets.DEV_URL }}
     steps:
-      - name: Checkout hub repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
+      - uses: ./.github/actions/setup-build
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build docs (preview — full monolithic build)
+      - name: Build docs (preview — full multi-spoke build)
         if: needs.validate-input.outputs.mode == 'preview'
         env:
           # clone-spokes.sh reads SPOKE_OVERRIDES so the override survives
@@ -276,77 +141,80 @@ jobs:
 
       - name: Build docs (merge — single-spoke build)
         if: needs.validate-input.outputs.mode == 'merge'
+        # Restrict the clone to the merged spoke; the config sees one
+        # checkout on disk and produces a single-spoke build mounted at /.
+        # The hub root is republished by the downstream `publish-hub` job
+        # (which calls publish-hub.yml — single source of truth for hub
+        # publishing).
         env:
           SPOKE_OVERRIDES: ${{ needs.validate-input.outputs.source_repo }}:${{ needs.validate-input.outputs.commit_sha }}
-          ONLY_SPOKE: ${{ needs.validate-input.outputs.spoke_id }}
+          ONLY_SPOKES: ${{ needs.validate-input.outputs.spoke_id }}
           SITE_URL: ${{ env.DEV_URL }}
           BASE_URL: /${{ needs.validate-input.outputs.spoke_route_base_path }}
         run: npm run build
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
-        with:
-          role-to-assume: ${{ env.DEV_ROLE }}
-          role-session-name: Github
-          aws-region: us-east-1
-
       - name: Deploy preview to <bucket>/pr/<spoke>/<N>/
         if: needs.validate-input.outputs.mode == 'preview'
-        env:
-          bucket: ${{ env.DEV_BUCKET }}
-          path: pr/${{ needs.validate-input.outputs.spoke_id }}/${{ needs.validate-input.outputs.pr_number }}
-        run: |
-          set -f
-          aws s3 sync --delete build "$bucket/$path"
+        uses: ./.github/actions/aws-deploy
+        with:
+          role:   ${{ secrets.DEV_ROLE }}
+          bucket: ${{ secrets.DEV_BUCKET }}
+          path:   pr/${{ needs.validate-input.outputs.spoke_id }}/${{ needs.validate-input.outputs.pr_number }}
 
-      - name: Deploy merged docs to <bucket>/<spoke>/ and clean up preview
+      - name: Deploy merged spoke to <bucket>/<spoke>/
         if: needs.validate-input.outputs.mode == 'merge'
-        env:
-          bucket: ${{ env.DEV_BUCKET }}
-          spoke_path: ${{ needs.validate-input.outputs.spoke_route_base_path }}
-          pr_path: pr/${{ needs.validate-input.outputs.spoke_id }}/${{ needs.validate-input.outputs.pr_number }}
-        run: |
-          set -f
-          aws s3 sync --delete build "$bucket/$spoke_path"
-          aws s3 rm --recursive "$bucket/$pr_path" || true
+        uses: ./.github/actions/aws-deploy
+        with:
+          role:   ${{ secrets.DEV_ROLE }}
+          bucket: ${{ secrets.DEV_BUCKET }}
+          path:   ${{ needs.validate-input.outputs.spoke_route_base_path }}
 
-  update-comment-success:
+      - name: Clean up old preview (merge only)
+        if: needs.validate-input.outputs.mode == 'merge'
+        uses: ./.github/actions/aws-deploy
+        with:
+          role:   ${{ secrets.DEV_ROLE }}
+          bucket: ${{ secrets.DEV_BUCKET }}
+          path:   pr/${{ needs.validate-input.outputs.spoke_id }}/${{ needs.validate-input.outputs.pr_number }}
+          mode:   rm
+
+  publish-hub:
+    # On merge, republish the hub root through publish-hub.yml so the
+    # spokes index reflects the new spoke deployment. Reusing that
+    # workflow keeps a single source of truth for hub publishing.
+    needs:
+      - validate-input
+      - build-and-deploy
+    if: needs.validate-input.outputs.mode == 'merge' && needs.build-and-deploy.result == 'success'
+    uses: ./.github/workflows/publish-hub.yml
+    secrets: inherit
+
+  comment-build-success:
     runs-on: ubuntu-latest
     needs:
       - validate-input
-      - post-comment-pre-build
-      - build-docs
-    if: |
-      always() &&
-      needs.validate-input.outputs.mode == 'preview' &&
-      needs.build-docs.result == 'success'
+      - build-and-deploy
+    if: needs.validate-input.outputs.mode == 'preview' && needs.build-and-deploy.result == 'success'
     permissions:
       contents: read
     environment:
       name: publish-preview
-      deployment: false
+    env:
+      DEV_URL: ${{ secrets.DEV_URL }}
     steps:
-      - name: Generate GitHub App token
-        id: generate-token
-        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          app-id: ${{ secrets.DOC_HELPER_APP_ID }}
-          private-key: ${{ secrets.DOC_HELPER_APP_PRIVATE_KEY }}
-          owner: ${{ needs.validate-input.outputs.repo_owner }}
-          repositories: ${{ needs.validate-input.outputs.repo_name }}
+          sparse-checkout: .github/actions/pr-comment
+          persist-credentials: false
+      - uses: ./.github/actions/pr-comment
+        with:
+          app_id:      ${{ secrets.DOC_HELPER_APP_ID }}
+          private_key: ${{ secrets.DOC_HELPER_APP_PRIVATE_KEY }}
+          owner:       ${{ needs.validate-input.outputs.repo_owner }}
+          repo:        ${{ needs.validate-input.outputs.repo_name }}
+          pr_number:   ${{ needs.validate-input.outputs.pr_number }}
+          edit_last:   'true'
+          body: |
+            ✅ Documentation preview deployed for commit `${{ needs.validate-input.outputs.commit_sha }}`
 
-      - name: Update deployment comment on PR
-        env:
-          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
-          SOURCE_REPO: ${{ needs.validate-input.outputs.source_repo }}
-          PR_NUM: ${{ needs.validate-input.outputs.pr_number }}
-          COMMIT_SHA: ${{ needs.validate-input.outputs.commit_sha }}
-          SPOKE_ID: ${{ needs.validate-input.outputs.spoke_id }}
-        run: |
-          PREVIEW_URL="${DEV_URL}/pr/${SPOKE_ID}/${PR_NUM}/"
-          gh pr comment "${PR_NUM}" \
-            --repo "${SOURCE_REPO}" \
-            --edit-last \
-            --body "✅ Documentation preview deployed for commit \`${COMMIT_SHA:0:7}\`
-
-          Preview: ${PREVIEW_URL}"
+            Preview: ${{ env.DEV_URL }}/pr/${{ needs.validate-input.outputs.spoke_id }}/${{ needs.validate-input.outputs.pr_number }}/

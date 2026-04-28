@@ -53,82 +53,74 @@ Two S3 buckets, each fronted by its own CloudFront distribution.
 
 ## Build modes
 
-The `docusaurus.config.ts` produces two shapes of build, controlled
-by `ONLY_SPOKE`:
+The site can be built in three shapes, depending on what's being
+published:
 
-| Mode | Trigger | `ONLY_SPOKE` | `BASE_URL` example | Output shape |
-|---|---|---|---|---|
-| Monolithic | PR preview | unset | `/pr/genai/12` | All spokes mounted under their `routeBasePath`; hub root landing at `/` |
-| Single-spoke | PR merge / Release | `<spoke>` | `/genai` or `/genai/v1.2` | One spoke mounted at `/`; hub root landing dropped (`pages: false`) |
-
-The single-spoke build's `build/` directory is the spoke's docs tree
-directly, so it can be `aws s3 sync`'d to `<bucket>/<spoke>/` or
-`<bucket>/<spoke>/<vX.Y>/` without any path rewriting.
+| Mode | Used by | What it produces |
+|---|---|---|
+| Hub-only | `publish-hub.yml` | Just the hub landing page, 404, and shared assets. |
+| Single-spoke | `publish-preview.yml` (merge) and `publish-release.yml` | One spoke's docs, served standalone at the spoke's URL prefix (`<bucket>/<spoke>/` or `<bucket>/<spoke>/<vX.Y>/`). |
+| Multi-spoke | `publish-preview.yml` (preview) | Hub landing plus every spoke under its `routeBasePath`. |
 
 ---
 
 ## Pipeline triggers
 
-All hub workflows are driven by `repository_dispatch` events sent by the
-spokes. Each spoke owns its own thin "trigger" workflow that authenticates
-via a GitHub App token shared with the hub.
+Hub workflows are driven by `repository_dispatch` events sent by spokes
+(each spoke owns a thin "trigger" workflow that authenticates via a
+shared GitHub App).
 
 ### PR preview — `pr/<spoke>/<N>/`
 
-Spoke event: PR labeled `deploy-doc-preview`, or new commit pushed to a
-PR that already has the label.
-
+Trigger: PR labeled `deploy-doc-preview`, or new commit on a labeled PR.
 Hub workflow: [`publish-preview.yml`](.github/workflows/publish-preview.yml)
-in **preview mode**.
+(preview mode).
 
-1. Validate sender, payload, spoke allowlist, and that `commit_sha`
-   matches the PR head.
-2. Full **monolithic** build of every spoke, with the source spoke
-   overridden to `commit_sha`. `BASE_URL=/pr/<spoke>/<N>`,
-   `SITE_URL=$DEV_URL`.
-3. `aws s3 sync --delete build/` → `<DEV_BUCKET>/pr/<spoke>/<N>/`.
-4. Comment on the PR with the preview URL.
+Builds the full site with the source spoke pointed at the PR commit,
+deploys to `<DEV_BUCKET>/pr/<spoke>/<N>/`, and comments on the PR with
+the preview URL.
 
-### PR merge — `<spoke>/`
+### PR merge — `/` + `/<spoke>/`
 
-Spoke event: PR closed with `merged == true` and the `deploy-doc-preview`
+Trigger: PR closed with `merged == true` and the `deploy-doc-preview`
 label.
-
 Hub workflow: [`publish-preview.yml`](.github/workflows/publish-preview.yml)
-in **merge mode** (selected by `branch ∈ {main, master}`).
+(merge mode).
 
-1. Validate the merge commit (PR head SHA, merge commit SHA, or any
-   commit reachable from the merged branch).
-2. **Single-spoke** build (`ONLY_SPOKE=<id>`). `BASE_URL=/<spoke>`,
-   `SITE_URL=$DEV_URL`.
-3. `aws s3 sync --delete build/` → `<DEV_BUCKET>/<spoke>/`.
-4. `aws s3 rm --recursive` → `<DEV_BUCKET>/pr/<spoke>/<N>/` (cleanup).
+Publishes the merged spoke at `<DEV_BUCKET>/<spoke>/`, removes the PR
+preview, and chains into [`publish-hub.yml`](.github/workflows/publish-hub.yml)
+to refresh the hub root.
 
 ### PR closed without merging — cleanup
 
-Spoke event: PR closed, not merged, label still present.
-
+Trigger: PR closed, not merged.
 Hub workflow: [`close-preview.yml`](.github/workflows/close-preview.yml).
 
-1. `aws s3 rm --recursive` → `<DEV_BUCKET>/pr/<spoke>/<N>/`.
+Removes `<DEV_BUCKET>/pr/<spoke>/<N>/`.
 
 ### Release — `<spoke>/<vX.Y>/`
 
-Spoke event: tag push matching `v[0-9]+.[0-9]+.[0-9]+`.
-
+Trigger: tag push matching `v[0-9]+.[0-9]+.[0-9]+`.
 Hub workflow: [`publish-release.yml`](.github/workflows/publish-release.yml).
 
-1. Validate the tag format and that it points at `commit_sha`.
-2. Derive `<minor> = vMAJOR.MINOR` from the tag.
-3. **Single-spoke** build (`ONLY_SPOKE=<id>`).
-   `BASE_URL=/<spoke>/<minor>`, `SITE_URL=$PROD_URL`.
-4. `aws s3 sync --delete build/` → `<PROD_BUCKET>/<spoke>/<minor>/`.
-5. Write `<PROD_BUCKET>/<spoke>/index.html` — a meta-refresh redirect to
-   `<minor>/`. The redirect always points at the most recently deployed
-   minor.
+Builds the spoke at the release commit and deploys it to
+`<PROD_BUCKET>/<spoke>/<vX.Y>/`. `<PROD_BUCKET>/<spoke>/index.html` is a
+redirect that always points at the most recently deployed minor. Patch
+releases overwrite their minor in place; older minors are untouched.
 
-Patch releases (`v1.2.3` → `v1.2.4`) overwrite the `<spoke>/v1.2/` prefix
-in place; older minors are left untouched.
+### Hub root — `/`
+
+Hub workflow: [`publish-hub.yml`](.github/workflows/publish-hub.yml).
+
+Triggers:
+- Push to `main` that touches hub-owned paths → deploy to **dev**.
+- `workflow_dispatch` with `environment: dev | prod` → deploy to either
+  bucket (used to bootstrap a new bucket or promote hub changes to prod).
+- `workflow_call` from the PR-merge flow → republish dev after a spoke
+  merge.
+
+This is the **only** workflow that publishes the hub root; existing
+spoke deployments at `<bucket>/<spoke>/` are preserved on every run.
 
 ---
 
@@ -161,13 +153,17 @@ Spokes additionally need `DOC_HUB_APP_ID`, `DOC_HUB_APP_PRIVATE_KEY`, and
 ./scripts/clone-spokes.sh \
   --use-local=openvinotoolkit/openvino.genai:/abs/path/to/openvino.genai
 
-# Full monolithic build (default).
+# Full multi-spoke build (default — uses every spoke present in spokes/).
 npm run build
 
-# Single-spoke build (matches the merge / release pipeline).
-ONLY_SPOKE=genai BASE_URL=/genai/v1.2/ \
-  SITE_URL=https://docs.example.com \
-  npm run build
+# Single-spoke build (matches the release pipeline). Restrict the clone
+# to one spoke; the build then mounts it at /.
+./scripts/clone-spokes.sh --only=genai
+BASE_URL=/genai/v1.2/ SITE_URL=https://docs.example.com npx docusaurus build
+
+# Hub-only build (matches publish-hub.yml). Skip cloning entirely so no
+# spoke checkouts exist on disk.
+rm -rf spokes/* && npx docusaurus build
 ```
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full contributor

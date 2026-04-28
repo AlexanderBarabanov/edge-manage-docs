@@ -1,0 +1,79 @@
+name: AWS S3 Deploy
+description: |
+  Configure AWS credentials via OIDC and run a single `aws s3 sync --delete`
+  or `aws s3 rm --recursive` against the given prefix.
+
+inputs:
+  role:
+    description: 'IAM role ARN to assume'
+    required: true
+  bucket:
+    description: 'S3 bucket URI (e.g. s3://my-bucket)'
+    required: true
+  path:
+    description: 'Path under the bucket (no leading slash). Use empty string to target the bucket root.'
+    required: false
+    default: ''
+  mode:
+    description: '`sync` (upload from `source` with --delete) or `rm` (recursive delete of `path`).'
+    required: false
+    default: 'sync'
+  source:
+    description: 'Local directory to sync from (only used when mode=sync).'
+    required: false
+    default: 'build'
+  excludes:
+    description: |
+      Newline-separated list of `--exclude` patterns (only used when mode=sync).
+      Example:
+        pr/*
+        genai/*
+    required: false
+    default: ''
+  region:
+    description: 'AWS region.'
+    required: false
+    default: 'us-east-1'
+
+runs:
+  using: composite
+  steps:
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+      with:
+        role-to-assume: ${{ inputs.role }}
+        role-session-name: Github
+        aws-region: ${{ inputs.region }}
+
+    - name: Run S3 ${{ inputs.mode }}
+      shell: bash
+      env:
+        BUCKET: ${{ inputs.bucket }}
+        TARGET_PATH: ${{ inputs.path }}
+        SOURCE: ${{ inputs.source }}
+        MODE: ${{ inputs.mode }}
+        EXCLUDES: ${{ inputs.excludes }}
+      run: |
+        set -euo pipefail
+        # Trim trailing slash on path; "$BUCKET/" is the canonical bucket root.
+        target="$BUCKET/${TARGET_PATH%/}"
+        case "$MODE" in
+          sync)
+            args=()
+            while IFS= read -r pattern; do
+              [[ -z "$pattern" ]] && continue
+              args+=(--exclude "$pattern")
+            done <<< "$EXCLUDES"
+            set -f
+            aws s3 sync --delete "$SOURCE" "$target" "${args[@]}"
+            ;;
+          rm)
+            set -f
+            # `--recursive` against a non-existent prefix is a no-op.
+            aws s3 rm --recursive "$target"
+            ;;
+          *)
+            echo "Error: invalid mode '$MODE' (expected sync|rm)" >&2
+            exit 1
+            ;;
+        esac

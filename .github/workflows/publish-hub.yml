@@ -1,0 +1,93 @@
+name: Publish Hub
+
+# Publishes the hub root (`/`) to dev or prod. The build is "hub-only":
+# `clone-spokes.sh` is skipped entirely, so docusaurus.config.ts sees zero
+# spoke checkouts on disk and the build emits just the hub landing,
+# 404 page, and shared assets — no spoke trees.
+#
+# Environment is derived from the trigger: tag push → prod; anything else → dev.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+  workflow_call:
+
+permissions: {}
+concurrency:
+  group: publish-hub-${{ startsWith(github.ref, 'refs/tags/') && 'prod' || 'dev' }}
+  cancel-in-progress: true
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      hub_changed: ${{ steps.changes.outputs.hub_any_changed }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - id: changes
+        uses: tj-actions/changed-files@2f7c5bfce28377bc069a65ba478de0a74aa0ca32 # v46.0.1
+        with:
+          # Inlined from the former components-path-filters.yml. A change
+          # to any of these files means the hub root needs republishing.
+          files_yaml: |
+            hub:
+              - docusaurus.config.ts
+              - sidebars/**
+              - src/**
+              - static/**
+              - spokes.yml
+              - package.json
+              - package-lock.json
+              - tsconfig.json
+              - .github/workflows/publish-hub.yml
+              - .github/actions/**
+
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.hub_changed == 'true'
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      # Tag push → prod, anything else → dev. Selecting the secret at the
+      # job-env level keeps secret values out of step outputs.
+      AWS_ROLE: ${{ startsWith(github.ref, 'refs/tags/') && secrets.PROD_ROLE   || secrets.DEV_ROLE }}
+      BUCKET:   ${{ startsWith(github.ref, 'refs/tags/') && secrets.PROD_BUCKET || secrets.DEV_BUCKET }}
+      SITE_URL: ${{ startsWith(github.ref, 'refs/tags/') && secrets.PROD_URL    || secrets.DEV_URL }}
+    steps:
+      - uses: ./.github/actions/setup-build
+
+      - name: Build hub-only docs
+        # Bypass `npm run build`'s prebuild hook (which clones spokes) and
+        # call docusaurus directly. With no spoke checkouts present the
+        # config emits just the hub root.
+        run: npx docusaurus build
+
+      - name: Build excludes for hub-root sync
+        id: excludes
+        run: |
+          set -euo pipefail
+          # --delete on the hub root would normally wipe <bucket>/<spoke>/.
+          # Exclude every spoke's routeBasePath (and the dev preview
+          # namespace) so spoke deployments survive.
+          {
+            echo "patterns<<EOF"
+            echo "pr/*"
+            yq -r '.spokes[].routeBasePath | . + "/*"' spokes.yml
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Deploy hub root, preserving spoke trees
+        uses: ./.github/actions/aws-deploy
+        with:
+          role: ${{ env.AWS_ROLE }}
+          bucket: ${{ env.BUCKET }}
+          excludes: ${{ steps.excludes.outputs.patterns }}

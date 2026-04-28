@@ -33,75 +33,30 @@ concurrency:
   group: publish-dev-${{ github.event.client_payload.source_repo || inputs.source_repo }}-${{ github.event.client_payload.pr_number || inputs.pr_number }}
   cancel-in-progress: false
 
-env:
-  DEV_ROLE: ${{ secrets.DEV_ROLE }}
-  DEV_BUCKET: ${{ secrets.DEV_BUCKET }}
-
 jobs:
   validate-input:
     runs-on: ubuntu-latest
     permissions:
       contents: read
     outputs:
-      source_repo: ${{ steps.validate.outputs.source_repo }}
       pr_number: ${{ steps.validate.outputs.pr_number }}
       spoke_id: ${{ steps.validate.outputs.spoke_id }}
     steps:
-      - name: Checkout hub repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          sparse-checkout: spokes.yml
+          sparse-checkout: .github/actions/validate-dispatch
           persist-credentials: false
-
-      - name: Validate input
-        id: validate
-        env:
-          CLIENT_PAYLOAD: ${{ toJson(github.event.client_payload) }}
-          SOURCE_REPO: ${{ github.event.client_payload.source_repo || inputs.source_repo }}
-          PR_NUM: ${{ github.event.client_payload.pr_number || inputs.pr_number }}
-          SENDER_LOGIN: ${{ github.event.sender.login }}
-          SENDER_ID: ${{ github.event.sender.id }}
-          SENDER_TYPE: ${{ github.event.sender.type }}
-        run: |
-          set -euo pipefail
-
-          if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
-            APPROVED_SENDER="test-ov-doc-manager[bot]"
-            APPROVED_SENDER_ID="276340820"
-            APPROVED_SENDER_TYPE="Bot"
-            [[ "$SENDER_LOGIN" == "$APPROVED_SENDER" ]] || { echo "Error: Sender '$SENDER_LOGIN' not approved"; exit 1; }
-            [[ "$SENDER_ID"    == "$APPROVED_SENDER_ID" ]] || { echo "Error: Sender ID mismatch"; exit 1; }
-            [[ "$SENDER_TYPE"  == "$APPROVED_SENDER_TYPE" ]] || { echo "Error: Sender type mismatch"; exit 1; }
-            for field in source_repo pr_number; do
-              echo "$CLIENT_PAYLOAD" | jq -e ".$field" > /dev/null \
-                || { echo "Error: Required payload field '$field' missing"; exit 1; }
-            done
-          fi
-
-          [[ "$PR_NUM" =~ ^[0-9]+$ ]] && [[ "$PR_NUM" -ge 1 ]] \
-            || { echo "Error: Invalid PR number: $PR_NUM"; exit 1; }
-          [[ "$SOURCE_REPO" =~ ^[a-zA-Z0-9_-]+/[a-zA-Z0-9._-]+$ ]] \
-            || { echo "Error: Invalid repository format: $SOURCE_REPO"; exit 1; }
-
-          # Source repo must be a known spoke. Look up its id so the
-          # cleanup path matches the namespaced layout used by the
-          # preview build (pr/<spoke>/<N>/).
-          SPOKE_ID=$(awk -v repo="$SOURCE_REPO" '
-            /^[[:space:]]*-[[:space:]]*repo:/ { current_repo=""; current_id=""
-              n = split($0, a, ":"); gsub(/^[[:space:]]+|[[:space:]]+$/, "", a[2]); current_repo=a[2] }
-            /^[[:space:]]*id:/                 { n = split($0, a, ":"); gsub(/^[[:space:]]+|[[:space:]]+$/, "", a[2]); current_id=a[2]
-              if (current_repo == repo && current_id != "") { print current_id; exit } }
-          ' spokes.yml)
-          if [[ -z "$SPOKE_ID" ]]; then
-            echo "Error: Repository '$SOURCE_REPO' not in spokes.yml"
-            exit 1
-          fi
-
-          {
-            echo "source_repo=$SOURCE_REPO"
-            echo "pr_number=$PR_NUM"
-            echo "spoke_id=$SPOKE_ID"
-          } >> "$GITHUB_OUTPUT"
+      - id: validate
+        uses: ./.github/actions/validate-dispatch
+        with:
+          event_type: close-preview
+          source_repo: ${{ github.event.client_payload.source_repo || inputs.source_repo }}
+          pr_number:   ${{ github.event.client_payload.pr_number   || inputs.pr_number }}
+          sender_login: ${{ github.event.sender.login }}
+          sender_id:    ${{ github.event.sender.id }}
+          sender_type:  ${{ github.event.sender.type }}
+          is_repository_dispatch: ${{ github.event_name == 'repository_dispatch' }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
   cleanup:
     runs-on: ubuntu-latest
@@ -110,18 +65,14 @@ jobs:
       id-token: write
       contents: read
     steps:
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          role-to-assume: ${{ env.DEV_ROLE }}
-          role-session-name: Github
-          aws-region: us-east-1
-
+          sparse-checkout: .github/actions/aws-deploy
+          persist-credentials: false
       - name: Remove preview folder
-        env:
-          bucket: ${{ env.DEV_BUCKET }}
-          pr_path: pr/${{ needs.validate-input.outputs.spoke_id }}/${{ needs.validate-input.outputs.pr_number }}
-        run: |
-          set -f
-          # `--recursive` against a non-existent prefix is a no-op.
-          aws s3 rm --recursive "$bucket/$pr_path"
+        uses: ./.github/actions/aws-deploy
+        with:
+          role:   ${{ secrets.DEV_ROLE }}
+          bucket: ${{ secrets.DEV_BUCKET }}
+          path:   pr/${{ needs.validate-input.outputs.spoke_id }}/${{ needs.validate-input.outputs.pr_number }}
+          mode:   rm
