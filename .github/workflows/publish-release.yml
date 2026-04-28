@@ -1,0 +1,227 @@
+name: Publish Documentation (Release)
+
+# Builds a single spoke's docs at a release tag and uploads them to the
+# prod bucket under <spoke>/<vX.Y>/, overwriting that minor prefix on
+# every patch release. Refreshes <spoke>/index.html to redirect to the
+# latest minor.
+#
+# Dispatch payload (`client_payload` for repository_dispatch, `inputs` for
+# workflow_dispatch) MUST include:
+#   source_repo  e.g. "openvinotoolkit/openvino.genai"
+#   tag          Release tag, MUST match ^v\d+\.\d+\.\d+$
+#   commit_sha   40-char hex (the commit the tag points at)
+#
+# Older minor versions in the bucket are left untouched; the prod shell
+# build is owned by a separate workflow.
+
+on:
+  repository_dispatch:
+    types: [publish-release]
+  workflow_dispatch:
+    inputs:
+      source_repo:
+        description: 'Source repository (owner/repo)'
+        required: true
+        type: string
+      tag:
+        description: 'Release tag (vX.Y.Z)'
+        required: true
+        type: string
+      commit_sha:
+        description: 'Commit SHA the tag points at (40 hex chars)'
+        required: true
+        type: string
+
+permissions: {}
+
+# Serialise prod-bucket writes per spoke so two simultaneous releases
+# (e.g. v1.2.3 + a re-tagged v1.2.4) don't fight over <spoke>/v1.2/.
+concurrency:
+  group: publish-release-${{ github.event.client_payload.source_repo || inputs.source_repo }}
+  cancel-in-progress: false
+
+env:
+  PROD_ROLE: ${{ secrets.PROD_ROLE }}
+  PROD_BUCKET: ${{ secrets.PROD_BUCKET }}
+  PROD_URL: ${{ secrets.PROD_URL }}
+
+jobs:
+  validate-input:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      source_repo: ${{ steps.validate.outputs.source_repo }}
+      repo_owner: ${{ steps.validate.outputs.repo_owner }}
+      repo_name: ${{ steps.validate.outputs.repo_name }}
+      tag: ${{ steps.validate.outputs.tag }}
+      minor: ${{ steps.validate.outputs.minor }}
+      commit_sha: ${{ steps.validate.outputs.commit_sha }}
+      spoke_id: ${{ steps.validate.outputs.spoke_id }}
+      spoke_route_base_path: ${{ steps.validate.outputs.spoke_route_base_path }}
+    steps:
+      - name: Checkout hub repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: spokes.yml
+          persist-credentials: false
+
+      - name: Validate input
+        id: validate
+        env:
+          CLIENT_PAYLOAD: ${{ toJson(github.event.client_payload) }}
+          SOURCE_REPO: ${{ github.event.client_payload.source_repo || inputs.source_repo }}
+          TAG: ${{ github.event.client_payload.tag || inputs.tag }}
+          COMMIT_SHA: ${{ github.event.client_payload.commit_sha || inputs.commit_sha }}
+          SENDER_LOGIN: ${{ github.event.sender.login }}
+          SENDER_ID: ${{ github.event.sender.id }}
+          SENDER_TYPE: ${{ github.event.sender.type }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "=== Validation Starting ==="
+
+          if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
+            APPROVED_SENDER="test-ov-doc-manager[bot]"
+            APPROVED_SENDER_ID="276340820"
+            APPROVED_SENDER_TYPE="Bot"
+            [[ "$SENDER_LOGIN" == "$APPROVED_SENDER" ]] || { echo "Error: Sender '$SENDER_LOGIN' not approved"; exit 1; }
+            [[ "$SENDER_ID"    == "$APPROVED_SENDER_ID" ]] || { echo "Error: Sender ID mismatch"; exit 1; }
+            [[ "$SENDER_TYPE"  == "$APPROVED_SENDER_TYPE" ]] || { echo "Error: Sender type mismatch"; exit 1; }
+            for field in source_repo tag commit_sha; do
+              echo "$CLIENT_PAYLOAD" | jq -e ".$field" > /dev/null \
+                || { echo "Error: Required payload field '$field' missing"; exit 1; }
+            done
+          fi
+
+          [[ "$COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]] \
+            || { echo "Error: Invalid commit SHA: $COMMIT_SHA"; exit 1; }
+          [[ "$SOURCE_REPO" =~ ^[a-zA-Z0-9_-]+/[a-zA-Z0-9._-]+$ ]] \
+            || { echo "Error: Invalid repository format: $SOURCE_REPO"; exit 1; }
+
+          # Tag MUST be vX.Y.Z so we can derive a stable per-minor prefix.
+          if [[ ! "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "Error: Tag '$TAG' does not match required format vMAJOR.MINOR.PATCH"
+            exit 1
+          fi
+          MINOR="v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+
+          # Spoke lookup from spokes.yml (id + routeBasePath).
+          SPOKE_LINE=$(awk -v repo="$SOURCE_REPO" '
+            /^[[:space:]]*-[[:space:]]*repo:/ { current_repo=""; current_id=""; current_rbp=""
+              n = split($0, a, ":"); gsub(/^[[:space:]]+|[[:space:]]+$/, "", a[2]); current_repo=a[2] }
+            /^[[:space:]]*id:/                 { n = split($0, a, ":"); gsub(/^[[:space:]]+|[[:space:]]+$/, "", a[2]); current_id=a[2] }
+            /^[[:space:]]*routeBasePath:/      { n = split($0, a, ":"); gsub(/^[[:space:]]+|[[:space:]]+$/, "", a[2]); current_rbp=a[2]
+              if (current_repo == repo && current_id != "" && current_rbp != "") { print current_id "|" current_rbp; exit } }
+          ' spokes.yml)
+          [[ -n "$SPOKE_LINE" ]] || { echo "Error: Repository '$SOURCE_REPO' not in spokes.yml"; exit 1; }
+          SPOKE_ID="${SPOKE_LINE%%|*}"
+          SPOKE_RBP="${SPOKE_LINE#*|}"
+
+          # Verify tag exists and points at the claimed commit.
+          # `git/refs/tags/<tag>` returns the annotated-tag object; lightweight
+          # tags resolve directly to the commit. Resolve via the dereferenced
+          # SHA returned by the tags API.
+          TAG_SHA=$(gh api "repos/$SOURCE_REPO/git/refs/tags/$TAG" --jq '.object.sha' 2>/dev/null || echo "")
+          [[ -n "$TAG_SHA" ]] || { echo "Error: Tag '$TAG' not found in $SOURCE_REPO"; exit 1; }
+          # Annotated tag → tag.object.sha is the tag object; dereference once.
+          TAG_OBJ_TYPE=$(gh api "repos/$SOURCE_REPO/git/tags/$TAG_SHA" --jq '.object.type' 2>/dev/null || echo "")
+          if [[ "$TAG_OBJ_TYPE" == "commit" ]]; then
+            TAG_COMMIT=$(gh api "repos/$SOURCE_REPO/git/tags/$TAG_SHA" --jq '.object.sha')
+          else
+            TAG_COMMIT="$TAG_SHA"
+          fi
+          [[ "$TAG_COMMIT" == "$COMMIT_SHA" ]] \
+            || { echo "Error: Tag '$TAG' points at $TAG_COMMIT, not $COMMIT_SHA"; exit 1; }
+
+          REPO_OWNER="${SOURCE_REPO%/*}"
+          REPO_NAME="${SOURCE_REPO#*/}"
+
+          {
+            echo "source_repo=$SOURCE_REPO"
+            echo "repo_owner=$REPO_OWNER"
+            echo "repo_name=$REPO_NAME"
+            echo "tag=$TAG"
+            echo "minor=$MINOR"
+            echo "commit_sha=$COMMIT_SHA"
+            echo "spoke_id=$SPOKE_ID"
+            echo "spoke_route_base_path=$SPOKE_RBP"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "✅ Release validated: $SOURCE_REPO@$TAG → $SPOKE_ID/$MINOR/"
+
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    needs: validate-input
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout hub repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build single-spoke docs at release tag
+        env:
+          # Pin the spoke checkout to the release commit. The tag itself
+          # would also work, but pinning by SHA matches the dispatch
+          # contract exactly.
+          SPOKE_OVERRIDES: ${{ needs.validate-input.outputs.source_repo }}:${{ needs.validate-input.outputs.commit_sha }}
+          ONLY_SPOKE: ${{ needs.validate-input.outputs.spoke_id }}
+          SITE_URL: ${{ env.PROD_URL }}
+          BASE_URL: /${{ needs.validate-input.outputs.spoke_route_base_path }}/${{ needs.validate-input.outputs.minor }}
+        run: npm run build
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+        with:
+          role-to-assume: ${{ env.PROD_ROLE }}
+          role-session-name: Github
+          aws-region: us-east-1
+
+      - name: Deploy minor prefix (overwrite)
+        env:
+          bucket: ${{ env.PROD_BUCKET }}
+          minor_path: ${{ needs.validate-input.outputs.spoke_route_base_path }}/${{ needs.validate-input.outputs.minor }}
+        run: |
+          set -f
+          aws s3 sync --delete build "$bucket/$minor_path"
+
+      - name: Refresh /<spoke>/ → /<spoke>/<minor>/ redirect
+        env:
+          bucket: ${{ env.PROD_BUCKET }}
+          spoke_path: ${{ needs.validate-input.outputs.spoke_route_base_path }}
+          minor: ${{ needs.validate-input.outputs.minor }}
+        run: |
+          set -euo pipefail
+          # The redirect always points to the just-deployed minor. If a
+          # later release of an *older* minor (e.g. backport patch) lands,
+          # this step will (correctly) overwrite the redirect to point at
+          # the older minor — operators run releases in order.
+          cat > /tmp/redirect.html <<EOF
+          <!doctype html>
+          <html lang="en">
+            <head>
+              <meta charset="utf-8" />
+              <title>Redirecting…</title>
+              <meta http-equiv="refresh" content="0; url=${minor}/" />
+              <link rel="canonical" href="${minor}/" />
+              <script>location.replace(location.pathname.replace(/\/?$/, '/') + '${minor}/' + location.search + location.hash);</script>
+            </head>
+            <body>
+              <p>Redirecting to <a href="${minor}/">${minor}/</a>…</p>
+            </body>
+          </html>
+          EOF
+          aws s3 cp /tmp/redirect.html "$bucket/$spoke_path/index.html" \
+            --content-type "text/html; charset=utf-8" \
+            --cache-control "public, max-age=300"
