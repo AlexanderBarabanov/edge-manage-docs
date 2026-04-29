@@ -13,6 +13,16 @@ on:
     tags: ['v*']
   workflow_dispatch:
   workflow_call:
+    secrets:
+      DEV_ROLE:
+        required: true
+        description: 'AWS IAM role ARN for dev bucket'
+      DEV_BUCKET:
+        required: true
+        description: 'S3 bucket name for dev deployments'
+      DEV_URL:
+        required: true
+        description: 'Base URL for dev site'
 
 permissions: {}
 concurrency:

@@ -201,7 +201,10 @@ jobs:
       pull-requests: read
       id-token: write
     uses: ./.github/workflows/publish-hub.yml
-    secrets: inherit
+    secrets:
+      DEV_ROLE: ${{ secrets.DEV_ROLE }}
+      DEV_BUCKET: ${{ secrets.DEV_BUCKET }}
+      DEV_URL: ${{ secrets.DEV_URL }}
 
   comment-build-success:
     runs-on: ubuntu-latest
