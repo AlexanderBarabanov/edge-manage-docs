@@ -68,6 +68,9 @@ jobs:
           sender_id:    ${{ github.event.sender.id }}
           sender_type:  ${{ github.event.sender.type }}
           is_repository_dispatch: ${{ github.event_name == 'repository_dispatch' }}
+          approved_sender_login: ${{ secrets.APPROVED_BOT_LOGIN }}
+          approved_sender_id: ${{ secrets.APPROVED_BOT_ID }}
+          approved_sender_type: ${{ secrets.APPROVED_BOT_TYPE }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
   build-and-deploy:

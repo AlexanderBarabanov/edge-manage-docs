@@ -48,6 +48,18 @@ inputs:
     description: 'Set to "true" when the calling workflow was triggered by a repository_dispatch event.'
     required: false
     default: 'false'
+  approved_sender_login:
+    description: 'Approved bot login name (only checked on repository_dispatch).'
+    required: false
+    default: ''
+  approved_sender_id:
+    description: 'Approved bot sender ID (only checked on repository_dispatch).'
+    required: false
+    default: ''
+  approved_sender_type:
+    description: 'Approved bot sender type (only checked on repository_dispatch).'
+    required: false
+    default: ''
   github_token:
     description: 'Token for the GH API checks (PR/tag/commit existence).'
     required: true
@@ -111,6 +123,9 @@ runs:
         SENDER_ID: ${{ inputs.sender_id }}
         SENDER_TYPE: ${{ inputs.sender_type }}
         IS_REPOSITORY_DISPATCH: ${{ inputs.is_repository_dispatch }}
+        APPROVED_SENDER_LOGIN: ${{ inputs.approved_sender_login }}
+        APPROVED_SENDER_ID: ${{ inputs.approved_sender_id }}
+        APPROVED_SENDER_TYPE: ${{ inputs.approved_sender_type }}
         GH_TOKEN: ${{ inputs.github_token }}
       run: |
         set -euo pipefail
@@ -118,13 +133,12 @@ runs:
 
         # --- Sender authentication (skipped for workflow_dispatch). -------
         if [[ "$IS_REPOSITORY_DISPATCH" == "true" ]]; then
-          APPROVED_SENDER="test-ov-doc-manager[bot]"
-          APPROVED_SENDER_ID="276340820"
-          APPROVED_SENDER_TYPE="Bot"
-
           echo "Request from: $SENDER_LOGIN (ID: $SENDER_ID, Type: $SENDER_TYPE)"
           [[ -n "$SENDER_LOGIN" ]] || { echo "Error: Sender info missing"; exit 1; }
-          [[ "$SENDER_LOGIN" == "$APPROVED_SENDER" ]] || { echo "Error: Sender '$SENDER_LOGIN' not approved"; exit 1; }
+          [[ -n "$APPROVED_SENDER_LOGIN" ]] || { echo "Error: APPROVED_SENDER_LOGIN not configured"; exit 1; }
+          [[ -n "$APPROVED_SENDER_ID" ]] || { echo "Error: APPROVED_SENDER_ID not configured"; exit 1; }
+          [[ -n "$APPROVED_SENDER_TYPE" ]] || { echo "Error: APPROVED_SENDER_TYPE not configured"; exit 1; }
+          [[ "$SENDER_LOGIN" == "$APPROVED_SENDER_LOGIN" ]] || { echo "Error: Sender '$SENDER_LOGIN' not approved"; exit 1; }
           [[ "$SENDER_ID"    == "$APPROVED_SENDER_ID" ]] || { echo "Error: Sender ID mismatch"; exit 1; }
           [[ "$SENDER_TYPE"  == "$APPROVED_SENDER_TYPE" ]] || { echo "Error: Sender type mismatch"; exit 1; }
           echo "✅ Sender authenticated"
@@ -229,13 +243,11 @@ runs:
               merge)
                 [[ "$PR_MERGED" == "true" ]] \
                   || { echo "Error: PR #$PR_NUM has not been merged (merged=$PR_MERGED, state=$PR_STATE)"; exit 1; }
-                # Accept either the merge commit on the default branch OR the
-                # original PR head (squash-merges synthesise a new SHA on the
-                # base branch and orphan the head SHA).
+                
+                # Only accept PR_HEAD_SHA or PR_MERGE_SHA to prevent downgrade attacks (double-check)
                 if [[ "$COMMIT_SHA" != "$PR_HEAD_SHA" && "$COMMIT_SHA" != "$PR_MERGE_SHA" ]]; then
-                  AHEAD=$(gh api "repos/$SOURCE_REPO/compare/$BRANCH...$COMMIT_SHA" --jq '.ahead_by' 2>/dev/null || echo "")
-                  [[ "$AHEAD" == "0" ]] \
-                    || { echo "Error: Commit $COMMIT_SHA not reachable from $BRANCH and does not match PR head/merge SHA"; exit 1; }
+                  echo "Error: Commit $COMMIT_SHA does not belong to PR #$PR_NUM (expected: $PR_HEAD_SHA or $PR_MERGE_SHA)"
+                  exit 1
                 fi
                 echo "✅ Merge commit verified against PR #$PR_NUM"
                 ;;
