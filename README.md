@@ -38,16 +38,16 @@ Two S3 buckets, each fronted by its own CloudFront distribution.
 <PROD_BUCKET>/
 ├── index.html                 ← hub root landing (multi-spoke shell)
 ├── <spoke>/
-│   ├── index.html             ← redirect to the latest minor
-│   ├── v1.0/                  ← immutable per-minor releases
+│   ├── index.html             ← redirect to the latest spoke version
+│   ├── v1.0/                  ← immutable per-spoke-version releases
 │   ├── v1.1/
 │   └── v1.2/
 ```
 
 - Each `<spoke>/<vX.Y>/` is built once per release tag, then overwritten
-  in place when a patch on that minor lands.
+  in place when a patch on that version lands.
 - `<spoke>/index.html` is a meta-refresh redirect that always points at
-  the most recently deployed minor of that spoke.
+  the most recently deployed version of that spoke.
 
 ---
 
@@ -58,9 +58,9 @@ published:
 
 | Mode | Used by | What it produces |
 |---|---|---|
-| Hub-only | `publish-hub.yml` | Just the hub landing page, 404, and shared assets. |
-| Single-spoke | `publish-preview.yml` (merge) and `publish-release.yml` | One spoke's docs, served standalone at the spoke's URL prefix (`<bucket>/<spoke>/` or `<bucket>/<spoke>/<vX.Y>/`). |
-| Multi-spoke | `publish-preview.yml` (preview) | Hub landing plus every spoke under its `routeBasePath`. |
+| Hub-only | `deploy-hub.yml` | Just the hub landing page, 404, and shared assets. |
+| Single-spoke | `deploy-spoke.yml` (merge / release) | One spoke's docs, served standalone at the spoke's URL prefix (`<bucket>/<spoke>/` or `<bucket>/<spoke>/<vX.Y>/`). |
+| Multi-spoke | `deploy-spoke.yml` (preview) | Hub landing plus every spoke under its `routeBasePath`. |
 
 ---
 
@@ -73,7 +73,7 @@ shared GitHub App).
 ### PR preview — `pr/<spoke>/<N>/`
 
 Trigger: PR labeled `deploy-doc-preview`, or new commit on a labeled PR.
-Hub workflow: [`publish-preview.yml`](.github/workflows/publish-preview.yml)
+Hub workflow: [`deploy-spoke.yml`](.github/workflows/deploy-spoke.yml)
 (preview mode).
 
 Builds the full site with the source spoke pointed at the PR commit,
@@ -84,40 +84,42 @@ the preview URL.
 
 Trigger: PR closed with `merged == true` and the `deploy-doc-preview`
 label.
-Hub workflow: [`publish-preview.yml`](.github/workflows/publish-preview.yml)
+Hub workflow: [`deploy-spoke.yml`](.github/workflows/deploy-spoke.yml)
 (merge mode).
 
-Publishes the merged spoke at `<DEV_BUCKET>/<spoke>/`, removes the PR
-preview, and chains into [`publish-hub.yml`](.github/workflows/publish-hub.yml)
-to refresh the hub root.
+Publishes the merged spoke at `<DEV_BUCKET>/<spoke>/` and removes the PR
+preview. Hub root republishing is handled separately by
+[`deploy-hub.yml`](.github/workflows/deploy-hub.yml) on push to `main`.
 
 ### PR closed without merging — cleanup
 
 Trigger: PR closed, not merged.
-Hub workflow: [`close-preview.yml`](.github/workflows/close-preview.yml).
+Hub workflow: [`deploy-spoke.yml`](.github/workflows/deploy-spoke.yml)
+(close mode).
 
 Removes `<DEV_BUCKET>/pr/<spoke>/<N>/`.
 
 ### Release — `<spoke>/<vX.Y>/`
 
 Trigger: tag push matching `v[0-9]+.[0-9]+.[0-9]+`.
-Hub workflow: [`publish-release.yml`](.github/workflows/publish-release.yml).
+Hub workflow: [`deploy-spoke.yml`](.github/workflows/deploy-spoke.yml)
+(release mode).
 
 Builds the spoke at the release commit and deploys it to
 `<PROD_BUCKET>/<spoke>/<vX.Y>/`. `<PROD_BUCKET>/<spoke>/index.html` is a
-redirect that always points at the most recently deployed minor. Patch
-releases overwrite their minor in place; older minors are untouched.
+redirect that always points at the most recently deployed spoke version.
+Patch releases overwrite their version prefix in place; older versions
+are untouched.
 
 ### Hub root — `/`
 
-Hub workflow: [`publish-hub.yml`](.github/workflows/publish-hub.yml).
+Hub workflow: [`deploy-hub.yml`](.github/workflows/deploy-hub.yml).
 
 Triggers:
 - Push to `main` that touches hub-owned paths → deploy to **dev**.
-- `workflow_dispatch` with `environment: dev | prod` → deploy to either
-  bucket (used to bootstrap a new bucket or promote hub changes to prod).
-- `workflow_call` from the PR-merge flow → republish dev after a spoke
-  merge.
+- Push of a tag matching `v*` → deploy to **prod**.
+- `workflow_dispatch` → manual rerun.
+- `workflow_call` → reserved for future chaining.
 
 This is the **only** workflow that publishes the hub root; existing
 spoke deployments at `<bucket>/<spoke>/` are preserved on every run.
@@ -126,10 +128,9 @@ spoke deployments at `<bucket>/<spoke>/` are preserved on every run.
 
 ## Concurrency
 
-All three dev workflows share a `concurrency` group keyed on
-`<source_repo>-<pr_number>`, so a `merge` event for a PR will never race
-the `preview` deploy for the same PR or its `close` cleanup. Releases
-serialise per spoke (`publish-release-<source_repo>`).
+`deploy-spoke.yml` runs share a `concurrency` group keyed on
+`<source_repo>-<pr_number|tag>`, so preview / merge / close events for
+the same PR never race, and releases serialise per tag.
 
 ---
 

@@ -2,7 +2,7 @@ name: Deploy Spoke
 
 on:
   repository_dispatch:
-    types: [deploy-spoke]
+    types: [deploy-preview, publish-release, close-preview]
   workflow_dispatch:
     inputs:
       source_repo:
@@ -64,7 +64,7 @@ jobs:
       - id: validate
         uses: ./.github/actions/validate-dispatch
         with:
-          event_type: ${{ (github.event.client_payload.closed || inputs.closed) == 'true' && 'close-preview' || ((github.event.client_payload.tag || inputs.tag) && 'publish-release' || 'deploy-preview') }}
+          event_type: ${{ github.event.action || ((inputs.closed == 'true' && 'close-preview') || (inputs.tag && 'publish-release') || 'deploy-preview') }}
           source_repo: ${{ github.event.client_payload.source_repo || inputs.source_repo }}
           pr_number:   ${{ github.event.client_payload.pr_number   || inputs.pr_number }}
           branch:      ${{ github.event.client_payload.branch      || inputs.branch }}
