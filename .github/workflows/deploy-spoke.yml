@@ -1,0 +1,146 @@
+name: Deploy Spoke
+
+on:
+  repository_dispatch:
+    types: [deploy-spoke]
+  workflow_dispatch:
+    inputs:
+      source_repo:
+        description: 'Source repository (owner/repo)'
+        required: true
+        type: string
+      pr_number:
+        description: 'Pull request number (preview/merge modes)'
+        required: false
+        type: string
+      branch:
+        description: 'Branch (main/master => merge, otherwise => preview)'
+        required: false
+        type: string
+      commit_sha:
+        description: 'Commit SHA (40 hex chars)'
+        required: true
+        type: string
+      tag:
+        description: 'Release tag vX.Y.Z (release mode only)'
+        required: false
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: deploy-spoke-${{ github.event.client_payload.source_repo || inputs.source_repo }}-${{ github.event.client_payload.pr_number || inputs.pr_number || github.event.client_payload.tag || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  validate-input:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      source_repo: ${{ steps.validate.outputs.source_repo }}
+      repo_owner: ${{ steps.validate.outputs.repo_owner }}
+      repo_name: ${{ steps.validate.outputs.repo_name }}
+      pr_number: ${{ steps.validate.outputs.pr_number }}
+      branch: ${{ steps.validate.outputs.branch }}
+      commit_sha: ${{ steps.validate.outputs.commit_sha }}
+      mode: ${{ steps.validate.outputs.mode }}
+      spoke_id: ${{ steps.validate.outputs.spoke_id }}
+      spoke_route_base_path: ${{ steps.validate.outputs.spoke_route_base_path }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            .github/actions/validate-dispatch
+            spokes.yml
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - id: validate
+        uses: ./.github/actions/validate-dispatch
+        with:
+          event_type: deploy-preview
+          source_repo: ${{ github.event.client_payload.source_repo || inputs.source_repo }}
+          pr_number:   ${{ github.event.client_payload.pr_number   || inputs.pr_number }}
+          branch:      ${{ github.event.client_payload.branch      || inputs.branch }}
+          commit_sha:  ${{ github.event.client_payload.commit_sha  || inputs.commit_sha }}
+          sender_login: ${{ github.event.sender.login }}
+          sender_id:    ${{ github.event.sender.id }}
+          sender_type:  ${{ github.event.sender.type }}
+          is_repository_dispatch: ${{ github.event_name == 'repository_dispatch' }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+  preview-comment-start:
+    runs-on: ubuntu-latest
+    needs: validate-input
+    if: needs.validate-input.outputs.mode == 'preview'
+    permissions:
+      contents: read
+    environment:
+      name: publish-preview
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/pr-comment
+          persist-credentials: false
+      - uses: ./.github/actions/pr-comment
+        with:
+          app_id:      ${{ secrets.DOC_HELPER_APP_ID }}
+          private_key: ${{ secrets.DOC_HELPER_APP_PRIVATE_KEY }}
+          owner:       ${{ needs.validate-input.outputs.repo_owner }}
+          repo:        ${{ needs.validate-input.outputs.repo_name }}
+          pr_number:   ${{ needs.validate-input.outputs.pr_number }}
+          body: "🔄 Building documentation preview for commit `${{ needs.validate-input.outputs.commit_sha }}`..."
+
+  preview-build-deploy:
+    runs-on: ubuntu-latest
+    needs:
+      - validate-input
+      - preview-comment-start
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions
+          persist-credentials: false
+      - uses: ./.github/actions/setup-build
+      - name: Build full site (multi-spoke, source spoke pinned to PR commit)
+        env:
+          SPOKE_OVERRIDES: ${{ needs.validate-input.outputs.source_repo }}:${{ needs.validate-input.outputs.commit_sha }}
+          SITE_URL: ${{ secrets.DEV_URL }}
+          BASE_URL: /pr/${{ needs.validate-input.outputs.spoke_id }}/${{ needs.validate-input.outputs.pr_number }}
+        run: npm run build
+      - name: Deploy preview
+        uses: ./.github/actions/aws-deploy
+        with:
+          role:   ${{ secrets.DEV_ROLE }}
+          bucket: ${{ secrets.DEV_BUCKET }}
+          path:   pr/${{ needs.validate-input.outputs.spoke_id }}/${{ needs.validate-input.outputs.pr_number }}
+
+  preview-comment-success:
+    runs-on: ubuntu-latest
+    needs:
+      - validate-input
+      - preview-build-deploy
+    permissions:
+      contents: read
+    environment:
+      name: publish-preview
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/pr-comment
+          persist-credentials: false
+      - uses: ./.github/actions/pr-comment
+        with:
+          app_id:      ${{ secrets.DOC_HELPER_APP_ID }}
+          private_key: ${{ secrets.DOC_HELPER_APP_PRIVATE_KEY }}
+          owner:       ${{ needs.validate-input.outputs.repo_owner }}
+          repo:        ${{ needs.validate-input.outputs.repo_name }}
+          pr_number:   ${{ needs.validate-input.outputs.pr_number }}
+          edit_last:   'true'
+          body: |
+            ✅ Documentation preview deployed for commit `${{ needs.validate-input.outputs.commit_sha }}`
+
+            Preview: ${{ secrets.DEV_URL }}/pr/${{ needs.validate-input.outputs.spoke_id }}/${{ needs.validate-input.outputs.pr_number }}/
