@@ -251,12 +251,13 @@ const config: Config = {
       logo: { alt: 'Intel logo', src: 'img/intel-logo.svg' },
       items: [
         { to: '/', label: 'Home', position: 'left' as const },
-        ...spokes.map((spoke) => ({
-          type: 'docSidebar' as const,
-          sidebarId: 'docs',
-          docsPluginId: docsPluginId(spoke),
-          position: 'left' as const,
+        // Plain links for every spoke (active in this build or already on
+        // S3 from a prior deploy). The hub bundle owns the navbar; per-spoke
+        // sidebars take over once the user is inside `/<routeBasePath>/`.
+        ...allSpokes.map((spoke) => ({
+          to: `/${spoke.routeBasePath}/`,
           label: spoke.label ?? spoke.id,
+          position: 'left' as const,
         })),
       ],
     },

@@ -43,8 +43,7 @@ else
   SELECT='.spokes[] | select(.id == strenv(SPOKE_ID))'
 fi
 
-# Emit one "<spoke_id> <command>" line per command to run. Commands are
-# Docusaurus CLI subcommands and never contain whitespace.
+
 LINES=$(SPOKE_ID="$SPOKE_ID" yq -r \
   "${SELECT} | .id as \$id | .prebuildCommands[]? | \$id + \" \" + ." \
   "$SPOKES_YML")
