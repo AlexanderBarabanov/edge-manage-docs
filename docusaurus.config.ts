@@ -32,12 +32,16 @@ const allSpokes: SpokeConfig[] = (
 const fs = require('fs') as typeof import('fs');
 
 // Exactly one of these three modes must be selected. No defaults, no fallbacks.
-//   HUB_ONLY=1         → emit only the hub root landing.
-//   BUILD_ALL_SPOKES=1 → emit every spoke under its routeBasePath, no hub.
-//   SPOKE=<id>         → emit one spoke mounted at `/`, no hub.
+// Every mode emits the hub landing at `/`; modes only differ in which spoke
+// docs plugins are wired in alongside it:
+//   HUB_ONLY=1         → hub landing only.
+//   BUILD_ALL_SPOKES=1 → hub landing + every spoke under its routeBasePath.
+//   SPOKE=<id>         → hub landing + that spoke under its routeBasePath
+//                        (or `<routeBasePath>/<SPOKE_VERSION>/` if set).
 const HUB_ONLY = process.env.HUB_ONLY === '1';
 const BUILD_ALL_SPOKES = process.env.BUILD_ALL_SPOKES === '1';
 const SPOKE = (process.env.SPOKE ?? '').trim();
+const SPOKE_VERSION = (process.env.SPOKE_VERSION ?? '').trim();
 
 const modesSet = [HUB_ONLY, BUILD_ALL_SPOKES, !!SPOKE].filter(Boolean).length;
 if (modesSet !== 1) {
@@ -47,6 +51,9 @@ if (modesSet !== 1) {
 }
 if (SPOKE && !allSpokes.some((s) => s.id === SPOKE)) {
   throw new Error(`SPOKE='${SPOKE}' not found in spokes.yml.`);
+}
+if (SPOKE_VERSION && !SPOKE) {
+  throw new Error('SPOKE_VERSION requires SPOKE=<id>.');
 }
 
 const spokes: SpokeConfig[] = HUB_ONLY
@@ -63,7 +70,7 @@ for (const s of spokes) {
 }
 
 const effectiveRouteBasePath = (spoke: SpokeConfig): string =>
-  SPOKE ? '/' : spoke.routeBasePath;
+  SPOKE_VERSION ? `${spoke.routeBasePath}/${SPOKE_VERSION}` : spoke.routeBasePath;
 
 function spokeCheckoutDir(spoke: SpokeConfig): string {
   // Matches clone-spokes.sh: basename(repo) under spokes/.
@@ -140,7 +147,7 @@ function samplesPlugin(spoke: SpokeConfig): PluginConfig | null {
   if (spoke.id !== 'genai') return null;
   const spokeDir = spokeCheckoutDir(spoke);
   const base = effectiveRouteBasePath(spoke);
-  const docsRouteBase = base === '/' ? '/samples' : `/${base}/samples`;
+  const docsRouteBase = `/${base}/samples`;
   return [
     require.resolve('./src/plugins/genai-samples-docs-plugin'),
     {
@@ -188,8 +195,9 @@ const config: Config = {
 
   customFields: {
     // Exposed to client-side code (e.g. the hub landing page) via
-    // useDocusaurusContext().
-    spokes: spokes.map((s) => ({
+    // useDocusaurusContext(). Always advertises every spoke so the hub
+    // landing renders the same card grid regardless of build mode.
+    spokes: allSpokes.map((s) => ({
       id: s.id,
       label: s.label ?? s.id,
       routeBasePath: s.routeBasePath,
@@ -208,9 +216,9 @@ const config: Config = {
       {
         docs: HUB_ONLY ? false : docsPluginOptions(firstSpoke),
         blog: false,
-        // Hub landing is owned by the hub-only build. Spoke artifacts
-        // (single or all-spokes) never include hub pages.
-        pages: HUB_ONLY ? undefined : false,
+        // Hub landing is always emitted; spoke modes wire docs plugins
+        // alongside it so a single bundle can serve both.
+        pages: undefined,
         theme: { customCss: './src/css/custom.css' },
       } satisfies Preset.Options,
     ],
@@ -242,18 +250,7 @@ const config: Config = {
       title: 'Edge Docs',
       logo: { alt: 'Intel logo', src: 'img/intel-logo.svg' },
       items: [
-        // Single-spoke artifact lives under `<bucket>/<rbp>/[<vX.Y>/]`,
-        // hub at `<bucket>/`. We need an absolute `/` not prefixed with
-        // `baseUrl`, so bypass <Link>'s automatic baseUrl prefixing.
-        SPOKE
-          ? {
-              href: '/',
-              prependBaseUrlToHref: false,
-              autoAddBaseUrl: false,
-              label: 'Home',
-              position: 'left' as const,
-            }
-          : { to: '/', label: 'Home', position: 'left' as const },
+        { to: '/', label: 'Home', position: 'left' as const },
         ...spokes.map((spoke) => ({
           type: 'docSidebar' as const,
           sidebarId: 'docs',

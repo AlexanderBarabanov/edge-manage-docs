@@ -30,6 +30,15 @@ inputs:
         genai/*
     required: false
     default: ''
+  includes:
+    description: |
+      Newline-separated list of `--include` patterns (only used when mode=sync).
+      Applied AFTER excludes so they can re-include subsets of excluded paths.
+      Example (deploy genai/v1.2/* while preserving siblings):
+        excludes: 'genai/*'
+        includes: 'genai/v1.2/*'
+    required: false
+    default: ''
   delete:
     description: 'Pass --delete to `aws s3 sync` (mode=sync only). Set to "false" to add files without removing existing ones.'
     required: false
@@ -57,6 +66,7 @@ runs:
         SOURCE: ${{ inputs.source }}
         MODE: ${{ inputs.mode }}
         EXCLUDES: ${{ inputs.excludes }}
+        INCLUDES: ${{ inputs.includes }}
         DELETE: ${{ inputs.delete }}
       run: |
         set -euo pipefail
@@ -70,6 +80,10 @@ runs:
               [[ -z "$pattern" ]] && continue
               args+=(--exclude "$pattern")
             done <<< "$EXCLUDES"
+            while IFS= read -r pattern; do
+              [[ -z "$pattern" ]] && continue
+              args+=(--include "$pattern")
+            done <<< "$INCLUDES"
             set -f
             aws s3 sync "$SOURCE" "$target" "${args[@]}"
             ;;
