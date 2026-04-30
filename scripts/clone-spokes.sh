@@ -79,6 +79,13 @@ if [[ -n "$LEGACY_OVERRIDE_REPO" && -n "$LEGACY_OVERRIDE_REF" ]]; then
   add_override "${LEGACY_OVERRIDE_REPO}:${LEGACY_OVERRIDE_REF}"
 fi
 
+# HUB_ONLY=1 — skip cloning entirely. Used by deploy-hub.yml so the
+# subsequent docusaurus build emits just the hub landing.
+if [[ "${HUB_ONLY:-}" == "1" ]]; then
+  echo "HUB_ONLY=1: skipping spoke cloning."
+  exit 0
+fi
+
 # SPOKE_OVERRIDES env var: whitespace-separated list of OWNER/NAME:REF specs.
 # Lets callers pass overrides through wrappers that don't forward argv
 # (e.g. `npm run build`, whose lifecycle auto-runs `prebuild` with no args).

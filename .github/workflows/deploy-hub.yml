@@ -1,0 +1,96 @@
+name: Deploy Hub
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+  workflow_call:
+
+permissions: {}
+
+concurrency:
+  group: deploy-hub-${{ startsWith(github.ref, 'refs/tags/') && 'prod' || 'dev' }}
+  cancel-in-progress: true
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      hub_changed: ${{ steps.decide.outputs.hub_changed }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - id: changes
+        if: github.event_name == 'push'
+        uses: tj-actions/changed-files@2f7c5bfce28377bc069a65ba478de0a74aa0ca32 # v46.0.1
+        with:
+          files_yaml: |
+            hub:
+              - docusaurus.config.ts
+              - sidebars/**
+              - src/**
+              - static/**
+              - spokes.yml
+              - package.json
+              - package-lock.json
+              - tsconfig.json
+              - .github/workflows/deploy-hub.yml
+              - .github/actions/**
+      - id: decide
+        env:
+          PUSH_RESULT: ${{ steps.changes.outputs.hub_any_changed }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            echo "hub_changed=${PUSH_RESULT}" >> "$GITHUB_OUTPUT"
+          else
+            echo "hub_changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.hub_changed == 'true'
+    permissions:
+      id-token: write
+      contents: read
+    environment:
+      name: ${{ startsWith(github.ref, 'refs/tags/') && 'publish-release' || 'publish-preview' }}
+    env:
+      AWS_ROLE: ${{ startsWith(github.ref, 'refs/tags/') && secrets.PROD_ROLE   || secrets.DEV_ROLE }}
+      BUCKET:   ${{ startsWith(github.ref, 'refs/tags/') && secrets.PROD_BUCKET || secrets.DEV_BUCKET }}
+      SITE_URL: ${{ startsWith(github.ref, 'refs/tags/') && secrets.PROD_URL    || secrets.DEV_URL }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-build
+
+      - name: Build hub-only docs
+        env:
+          HUB_ONLY: '1'
+        run: npm run build
+
+      - name: Build excludes for hub-root sync
+        id: excludes
+        run: |
+          set -euo pipefail
+          {
+            echo "patterns<<EOF"
+            echo "pr/*"
+            yq -r '.spokes[].routeBasePath | . + "/*"' spokes.yml
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Deploy hub root, preserving spoke trees
+        uses: ./.github/actions/aws-deploy
+        with:
+          role: ${{ env.AWS_ROLE }}
+          bucket: ${{ env.BUCKET }}
+          excludes: ${{ steps.excludes.outputs.patterns }}
