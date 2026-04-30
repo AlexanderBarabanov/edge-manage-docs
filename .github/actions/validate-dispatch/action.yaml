@@ -190,6 +190,7 @@ runs:
             exit 1
           fi
           MINOR="v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+          MODE="release"
         fi
 
         # --- Spoke lookup from spokes.yml via yq. -------------------------
