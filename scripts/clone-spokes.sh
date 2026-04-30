@@ -138,17 +138,6 @@ fi
 
 mkdir -p "$ROOT_DIR/spokes"
 
-# Sentinel file: when the clone is restricted to a subset of spokes
-# (release / merge-mode preview), drop a marker so docusaurus.config.ts
-# can detect single-spoke mode from the filesystem alone — no env var.
-# Removed unconditionally first so a subsequent unrestricted clone
-# resets the build mode back to multi-spoke.
-SENTINEL="$ROOT_DIR/spokes/.single-spoke"
-rm -f "$SENTINEL"
-if [[ ${#ONLY_IDS[@]} -gt 0 ]]; then
-  : > "$SENTINEL"
-fi
-
 # Parse spokes.yml line by line
 CURRENT_REPO=""
 CURRENT_REF=""

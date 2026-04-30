@@ -144,3 +144,40 @@ jobs:
             ✅ Documentation preview deployed for commit `${{ needs.validate-input.outputs.commit_sha }}`
 
             Preview: ${{ secrets.DEV_URL }}/pr/${{ needs.validate-input.outputs.spoke_id }}/${{ needs.validate-input.outputs.pr_number }}/
+
+  merge-build-deploy:
+    runs-on: ubuntu-latest
+    needs: validate-input
+    if: needs.validate-input.outputs.mode == 'merge'
+    permissions:
+      id-token: write
+      contents: read
+    environment:
+      name: publish-preview
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions
+          persist-credentials: false
+      - uses: ./.github/actions/setup-build
+      - name: Build spoke artifact
+        env:
+          SPOKE_OVERRIDES: ${{ needs.validate-input.outputs.source_repo }}:${{ needs.validate-input.outputs.commit_sha }}
+          ONLY_SPOKES: ${{ needs.validate-input.outputs.spoke_id }}
+          SITE_URL: ${{ secrets.DEV_URL }}
+          BASE_URL: /${{ needs.validate-input.outputs.spoke_route_base_path }}/
+        run: npm run build
+      - name: Deploy spoke to <DEV>/<rbp>/
+        uses: ./.github/actions/aws-deploy
+        with:
+          role:   ${{ secrets.DEV_ROLE }}
+          bucket: ${{ secrets.DEV_BUCKET }}
+          path:   ${{ needs.validate-input.outputs.spoke_route_base_path }}
+      - name: Remove stale PR preview
+        if: needs.validate-input.outputs.pr_number != ''
+        uses: ./.github/actions/aws-deploy
+        with:
+          role:   ${{ secrets.DEV_ROLE }}
+          bucket: ${{ secrets.DEV_BUCKET }}
+          path:   pr/${{ needs.validate-input.outputs.spoke_id }}/${{ needs.validate-input.outputs.pr_number }}
+          mode:   rm
