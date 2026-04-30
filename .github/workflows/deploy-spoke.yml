@@ -18,11 +18,15 @@ on:
         required: false
         type: string
       commit_sha:
-        description: 'Commit SHA (40 hex chars)'
-        required: true
+        description: 'Commit SHA (40 hex chars; not required for close mode)'
+        required: false
         type: string
       tag:
         description: 'Release tag vX.Y.Z (release mode only)'
+        required: false
+        type: string
+      closed:
+        description: 'Set to "true" to clean up a closed PR preview'
         required: false
         type: string
 
@@ -45,7 +49,7 @@ jobs:
       branch: ${{ steps.validate.outputs.branch }}
       commit_sha: ${{ steps.validate.outputs.commit_sha }}
       tag: ${{ steps.validate.outputs.tag }}
-      minor: ${{ steps.validate.outputs.minor }}
+      spoke_version: ${{ steps.validate.outputs.spoke_version }}
       mode: ${{ steps.validate.outputs.mode }}
       spoke_id: ${{ steps.validate.outputs.spoke_id }}
       spoke_route_base_path: ${{ steps.validate.outputs.spoke_route_base_path }}
@@ -60,7 +64,7 @@ jobs:
       - id: validate
         uses: ./.github/actions/validate-dispatch
         with:
-          event_type: ${{ (github.event.client_payload.tag || inputs.tag) && 'publish-release' || 'deploy-preview' }}
+          event_type: ${{ (github.event.client_payload.closed || inputs.closed) == 'true' && 'close-preview' || ((github.event.client_payload.tag || inputs.tag) && 'publish-release' || 'deploy-preview') }}
           source_repo: ${{ github.event.client_payload.source_repo || inputs.source_repo }}
           pr_number:   ${{ github.event.client_payload.pr_number   || inputs.pr_number }}
           branch:      ${{ github.event.client_payload.branch      || inputs.branch }}
@@ -205,19 +209,19 @@ jobs:
           SPOKE_OVERRIDES: ${{ needs.validate-input.outputs.source_repo }}:${{ needs.validate-input.outputs.commit_sha }}
           ONLY_SPOKES: ${{ needs.validate-input.outputs.spoke_id }}
           SITE_URL: ${{ secrets.PROD_URL }}
-          BASE_URL: /${{ needs.validate-input.outputs.spoke_route_base_path }}/${{ needs.validate-input.outputs.minor }}/
+          BASE_URL: /${{ needs.validate-input.outputs.spoke_route_base_path }}/${{ needs.validate-input.outputs.spoke_version }}/
         run: npm run build
       - name: Deploy spoke to <PROD>/<rbp>/<vX.Y>/
         uses: ./.github/actions/aws-deploy
         with:
           role:   ${{ secrets.PROD_ROLE }}
           bucket: ${{ secrets.PROD_BUCKET }}
-          path:   ${{ needs.validate-input.outputs.spoke_route_base_path }}/${{ needs.validate-input.outputs.minor }}
+          path:   ${{ needs.validate-input.outputs.spoke_route_base_path }}/${{ needs.validate-input.outputs.spoke_version }}
       - name: Refresh /<rbp>/ → /<rbp>/<vX.Y>/ redirect
         env:
           BUCKET: ${{ secrets.PROD_BUCKET }}
           SPOKE_PATH: ${{ needs.validate-input.outputs.spoke_route_base_path }}
-          MINOR: ${{ needs.validate-input.outputs.minor }}
+          SPOKE_VERSION: ${{ needs.validate-input.outputs.spoke_version }}
           ROLE: ${{ secrets.PROD_ROLE }}
         run: |
           set -euo pipefail
@@ -227,15 +231,37 @@ jobs:
             <head>
               <meta charset="utf-8" />
               <title>Redirecting…</title>
-              <meta http-equiv="refresh" content="0; url=${MINOR}/" />
-              <link rel="canonical" href="${MINOR}/" />
-              <script>location.replace(location.pathname.replace(/\/?\$/, '/') + '${MINOR}/' + location.search + location.hash);</script>
+              <meta http-equiv="refresh" content="0; url=${SPOKE_VERSION}/" />
+              <link rel="canonical" href="${SPOKE_VERSION}/" />
+              <script>location.replace(location.pathname.replace(/\/?\$/, '/') + '${SPOKE_VERSION}/' + location.search + location.hash);</script>
             </head>
             <body>
-              <p>Redirecting to <a href="${MINOR}/">${MINOR}/</a>…</p>
+              <p>Redirecting to <a href="${SPOKE_VERSION}/">${SPOKE_VERSION}/</a>…</p>
             </body>
           </html>
           HTML
           aws s3 cp /tmp/redirect.html "$BUCKET/$SPOKE_PATH/index.html" \
             --content-type "text/html; charset=utf-8" \
             --cache-control "public, max-age=300"
+
+  close-cleanup:
+    runs-on: ubuntu-latest
+    needs: validate-input
+    if: needs.validate-input.outputs.mode == 'close'
+    permissions:
+      id-token: write
+      contents: read
+    environment:
+      name: publish-preview
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/aws-deploy
+          persist-credentials: false
+      - name: Remove preview folder
+        uses: ./.github/actions/aws-deploy
+        with:
+          role:   ${{ secrets.DEV_ROLE }}
+          bucket: ${{ secrets.DEV_BUCKET }}
+          path:   pr/${{ needs.validate-input.outputs.spoke_id }}/${{ needs.validate-input.outputs.pr_number }}
+          mode:   rm
