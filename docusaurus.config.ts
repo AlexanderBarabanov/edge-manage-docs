@@ -32,16 +32,27 @@ const allSpokes: SpokeConfig[] = (
 const fs = require('fs') as typeof import('fs');
 
 // Exactly one of these three modes must be selected. No defaults, no fallbacks.
-// Every mode emits the hub landing at `/`; modes only differ in which spoke
-// docs plugins are wired in alongside it:
-//   HUB_ONLY=1         → hub landing only.
-//   BUILD_ALL_SPOKES=1 → hub landing + every spoke under its routeBasePath.
-//   SPOKE=<id>         → hub landing + that spoke under its routeBasePath
-//                        (or `<routeBasePath>/<SPOKE_VERSION>/` if set).
+// Each mode emits a single self-contained Docusaurus bundle whose webpack
+// `publicPath` is set by `baseUrl` below — so its assets live entirely under
+// that prefix and never collide with bundles deployed at sibling prefixes:
+//   HUB_ONLY=1                       → hub landing only, baseUrl = /.
+//   BUILD_ALL_SPOKES=1               → hub + every spoke (used by previews),
+//                                       baseUrl from $BASE_URL (e.g. /pr/<id>/<N>/).
+//   SPOKE=<id>                       → that spoke alone, baseUrl = /<rbp>/.
+//   SPOKE=<id> + SPOKE_VERSION=vX.Y  → that spoke alone, baseUrl = /<rbp>/<vX.Y>/.
 const HUB_ONLY = process.env.HUB_ONLY === '1';
 const BUILD_ALL_SPOKES = process.env.BUILD_ALL_SPOKES === '1';
 const SPOKE = (process.env.SPOKE ?? '').trim();
 const SPOKE_VERSION = (process.env.SPOKE_VERSION ?? '').trim();
+
+// Site origin (no trailing slash). Used for the canonical site URL and for
+// cross-bundle navbar links (those need an absolute URL so Docusaurus treats
+// them as external and skips baseUrl prefixing).
+const SITE_URL = (process.env.SITE_URL ?? '').trim();
+if (!SITE_URL) {
+  throw new Error('SITE_URL must be set (e.g. https://docs.example.com).');
+}
+const SITE_ORIGIN = SITE_URL.replace(/\/+$/, '');
 
 const modesSet = [HUB_ONLY, BUILD_ALL_SPOKES, !!SPOKE].filter(Boolean).length;
 if (modesSet !== 1) {
@@ -49,10 +60,12 @@ if (modesSet !== 1) {
     'Exactly one build mode must be set: HUB_ONLY=1, BUILD_ALL_SPOKES=1, or SPOKE=<id>.',
   );
 }
-if (SPOKE && !allSpokes.some((s) => s.id === SPOKE)) {
+const SPOKE_MODE = !!SPOKE;
+const selectedSpoke = SPOKE_MODE ? allSpokes.find((s) => s.id === SPOKE) : undefined;
+if (SPOKE_MODE && !selectedSpoke) {
   throw new Error(`SPOKE='${SPOKE}' not found in spokes.yml.`);
 }
-if (SPOKE_VERSION && !SPOKE) {
+if (SPOKE_VERSION && !SPOKE_MODE) {
   throw new Error('SPOKE_VERSION requires SPOKE=<id>.');
 }
 
@@ -60,7 +73,7 @@ const spokes: SpokeConfig[] = HUB_ONLY
   ? []
   : BUILD_ALL_SPOKES
     ? allSpokes
-    : allSpokes.filter((s) => s.id === SPOKE);
+    : [selectedSpoke!];
 
 for (const s of spokes) {
   const dir = path.join(REPO_ROOT, SPOKES_DIR, s.repo.split('/').pop()!);
@@ -69,8 +82,11 @@ for (const s of spokes) {
   }
 }
 
+// In SPOKE mode the entire bundle is rooted at /<rbp>/[<v>/], so the spoke's
+// docs sit at routeBasePath '/'. In BUILD_ALL_SPOKES mode each spoke mounts
+// at its own <rbp> within a single hub bundle.
 const effectiveRouteBasePath = (spoke: SpokeConfig): string =>
-  SPOKE_VERSION ? `${spoke.routeBasePath}/${SPOKE_VERSION}` : spoke.routeBasePath;
+  SPOKE_MODE ? '/' : spoke.routeBasePath;
 
 function spokeCheckoutDir(spoke: SpokeConfig): string {
   // Matches clone-spokes.sh: basename(repo) under spokes/.
@@ -146,8 +162,9 @@ function samplesPlugin(spoke: SpokeConfig): PluginConfig | null {
   // Only wire the samples plugin for the GenAI spoke (it is GenAI-specific).
   if (spoke.id !== 'genai') return null;
   const spokeDir = spokeCheckoutDir(spoke);
-  const base = effectiveRouteBasePath(spoke);
-  const docsRouteBase = `/${base}/samples`;
+  // In SPOKE mode the spoke owns '/' (the bundle is rooted at /<rbp>/[<v>/]),
+  // so samples live at '/samples'. In BUILD_ALL_SPOKES they live at '/<rbp>/samples'.
+  const docsRouteBase = SPOKE_MODE ? '/samples' : `/${spoke.routeBasePath}/samples`;
   return [
     require.resolve('./src/plugins/genai-samples-docs-plugin'),
     {
@@ -181,14 +198,21 @@ const config: Config = {
   title: 'Edge Docs Hub',
   favicon: 'img/favicon.png',
 
-  // Production URL of the site. Override per deployment via $SITE_URL —
-  // preview builds (S3 + CloudFront) and GitHub Pages want different values.
-  url: process.env.SITE_URL || 'https://open-edge-platform.github.io',
-  // URL prefix under which the site is served. '/' for production;
-  // '/pr/<N>/' for PR previews served as sub-paths.
-  baseUrl: process.env.BASE_URL
-    ? process.env.BASE_URL.replace(/\/?$/, '/')
-    : '/',
+  // Production URL of the site. Override per deployment via $SITE_URL.
+  url: SITE_ORIGIN,
+  // URL prefix under which the site is served. The bundle owns this prefix
+  // entirely (its assets are emitted under it). Each deploy mode picks a
+  // disjoint baseUrl so multiple bundles can coexist on the same bucket
+  // without `--delete` wiping each other's assets:
+  //   HUB_ONLY=1                       → / (or $BASE_URL).
+  //   BUILD_ALL_SPOKES=1               → $BASE_URL (e.g. /pr/<id>/<N>/).
+  //   SPOKE=<id>                       → /<rbp>/.
+  //   SPOKE=<id> + SPOKE_VERSION=vX.Y  → /<rbp>/<vX.Y>/.
+  baseUrl: SPOKE_MODE
+    ? `/${selectedSpoke!.routeBasePath}/${SPOKE_VERSION ? `${SPOKE_VERSION}/` : ''}`
+    : process.env.BASE_URL
+      ? process.env.BASE_URL.replace(/\/?$/, '/')
+      : '/',
 
   organizationName: 'open-edge-platform',
   projectName: 'edge-manage-docs',
@@ -216,9 +240,10 @@ const config: Config = {
       {
         docs: HUB_ONLY ? false : docsPluginOptions(firstSpoke),
         blog: false,
-        // Hub landing is always emitted; spoke modes wire docs plugins
-        // alongside it so a single bundle can serve both.
-        pages: undefined,
+        // The hub landing under src/pages/ is only relevant for builds that
+        // include the hub itself (HUB_ONLY, BUILD_ALL_SPOKES). In SPOKE mode
+        // the bundle is the spoke alone and must not emit a hub landing.
+        pages: SPOKE_MODE ? false : undefined,
         theme: { customCss: './src/css/custom.css' },
       } satisfies Preset.Options,
     ],
@@ -249,17 +274,30 @@ const config: Config = {
     navbar: {
       title: 'Edge Docs',
       logo: { alt: 'Intel logo', src: 'img/intel-logo.svg' },
-      items: [
-        { to: '/', label: 'Home', position: 'left' as const },
-        // Plain links for every spoke (active in this build or already on
-        // S3 from a prior deploy). The hub bundle owns the navbar; per-spoke
-        // sidebars take over once the user is inside `/<routeBasePath>/`.
-        ...allSpokes.map((spoke) => ({
-          to: `/${spoke.routeBasePath}/`,
-          label: spoke.label ?? spoke.id,
-          position: 'left' as const,
-        })),
-      ],
+      items: SPOKE_MODE
+        ? [
+            // Spoke bundles are self-contained sites and only carry a link
+            // back to the hub. The hub link is absolute (with `target=_self`)
+            // because the spoke is rooted at /<rbp>/[<v>/] and Docusaurus
+            // would otherwise prefix it with that baseUrl.
+            {
+              href: `${SITE_ORIGIN}/`,
+              label: 'Home',
+              position: 'left' as const,
+              target: '_self',
+            },
+          ]
+        : [
+            // HUB_ONLY / BUILD_ALL_SPOKES: the bundle owns the parent prefix
+            // (`/` for hub, `/pr/<id>/<N>/` for previews) so spokes inside
+            // it are reachable via Docusaurus' baseUrl-relative `to:`.
+            { to: '/', label: 'Home', position: 'left' as const },
+            ...allSpokes.map((spoke) => ({
+              to: `/${spoke.routeBasePath}/`,
+              label: spoke.label ?? spoke.id,
+              position: 'left' as const,
+            })),
+          ],
     },
     prism: { theme: prismThemes.github, darkTheme: prismThemes.dracula },
   } satisfies Preset.ThemeConfig,
