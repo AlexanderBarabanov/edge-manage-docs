@@ -5,7 +5,7 @@
   "scripts": {
     "docusaurus": "docusaurus",
     "clone-spokes": "./scripts/clone-spokes.sh",
-    "gen-samples": "if [ \"$HUB_ONLY\" = \"1\" ]; then echo 'HUB_ONLY=1: skipping gen-samples'; else docusaurus generate-samples-docs:genai-samples-docs-plugin; fi",
+    "gen-samples": "./scripts/run-spoke-prebuild.sh",
     "prebuild": "npm run clone-spokes && npm run gen-samples",
     "start": "npm run prebuild && docusaurus start",
     "build": "docusaurus build",
