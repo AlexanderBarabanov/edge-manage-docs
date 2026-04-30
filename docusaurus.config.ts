@@ -22,7 +22,7 @@ type SpokesYml = {
 };
 
 const REPO_ROOT = __dirname;
-const SPOKES_DIR = 'spokes'; // Relative to REPO_ROOT; populated by scripts/clone-spokes.sh.
+const SPOKES_DIR = 'spokes';
 
 const allSpokes: SpokeConfig[] = (
   yamlLoad(readFileSync(path.join(REPO_ROOT, 'spokes.yml'), 'utf8')) as SpokesYml
@@ -30,26 +30,40 @@ const allSpokes: SpokeConfig[] = (
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const fs = require('fs') as typeof import('fs');
-const spokes: SpokeConfig[] = allSpokes.filter((s) => {
-  try {
-    fs.statSync(path.join(REPO_ROOT, SPOKES_DIR, s.repo.split('/').pop()!));
-    return true;
-  } catch {
-    return false;
-  }
-});
-const isHubOnlyBuild = process.env.HUB_ONLY === '1';
 
-// ONLY_SPOKES set → produce a self-contained spoke artifact: the listed
-// spoke(s) own `/`, the hub root landing is dropped. The artifact is then
-// deployed under `<bucket>/<rbp>/` (or `<bucket>/<rbp>/<vX.Y>/` for release).
-const onlySpokes = (process.env.ONLY_SPOKES ?? '')
-  .split(/[\s,]+/)
-  .filter(Boolean);
-const isSingleSpokeBuild = onlySpokes.length > 0 && spokes.length > 0;
+// Exactly one of these three modes must be selected. No defaults, no fallbacks.
+//   HUB_ONLY=1         → emit only the hub root landing.
+//   BUILD_ALL_SPOKES=1 → emit every spoke under its routeBasePath, no hub.
+//   SPOKE=<id>         → emit one spoke mounted at `/`, no hub.
+const HUB_ONLY = process.env.HUB_ONLY === '1';
+const BUILD_ALL_SPOKES = process.env.BUILD_ALL_SPOKES === '1';
+const SPOKE = (process.env.SPOKE ?? '').trim();
+
+const modesSet = [HUB_ONLY, BUILD_ALL_SPOKES, !!SPOKE].filter(Boolean).length;
+if (modesSet !== 1) {
+  throw new Error(
+    'Exactly one build mode must be set: HUB_ONLY=1, BUILD_ALL_SPOKES=1, or SPOKE=<id>.',
+  );
+}
+if (SPOKE && !allSpokes.some((s) => s.id === SPOKE)) {
+  throw new Error(`SPOKE='${SPOKE}' not found in spokes.yml.`);
+}
+
+const spokes: SpokeConfig[] = HUB_ONLY
+  ? []
+  : BUILD_ALL_SPOKES
+    ? allSpokes
+    : allSpokes.filter((s) => s.id === SPOKE);
+
+for (const s of spokes) {
+  const dir = path.join(REPO_ROOT, SPOKES_DIR, s.repo.split('/').pop()!);
+  if (!fs.existsSync(dir)) {
+    throw new Error(`Spoke '${s.id}' (${s.repo}) not checked out at ${dir}.`);
+  }
+}
 
 const effectiveRouteBasePath = (spoke: SpokeConfig): string =>
-  isSingleSpokeBuild ? '/' : spoke.routeBasePath;
+  SPOKE ? '/' : spoke.routeBasePath;
 
 function spokeCheckoutDir(spoke: SpokeConfig): string {
   // Matches clone-spokes.sh: basename(repo) under spokes/.
@@ -192,11 +206,11 @@ const config: Config = {
     [
       'classic',
       {
-        docs: isHubOnlyBuild ? false : docsPluginOptions(firstSpoke),
+        docs: HUB_ONLY ? false : docsPluginOptions(firstSpoke),
         blog: false,
-        // Single-spoke artifact: the spoke owns `/`, hub landing is owned
-        // by a separate hub-only build deployed to the bucket root.
-        pages: isSingleSpokeBuild ? false : undefined,
+        // Hub landing is owned by the hub-only build. Spoke artifacts
+        // (single or all-spokes) never include hub pages.
+        pages: HUB_ONLY ? undefined : false,
         theme: { customCss: './src/css/custom.css' },
       } satisfies Preset.Options,
     ],
@@ -208,7 +222,7 @@ const config: Config = {
     // The search theme's <SearchBar> hooks into the docs plugin's global
     // data. In hub-only builds there's no docs plugin, so we drop the
     // search theme entirely (the hub landing has no content to search).
-    ...(isHubOnlyBuild
+    ...(HUB_ONLY
       ? []
       : ([
           [
@@ -231,7 +245,7 @@ const config: Config = {
         // Single-spoke artifact lives under `<bucket>/<rbp>/[<vX.Y>/]`,
         // hub at `<bucket>/`. We need an absolute `/` not prefixed with
         // `baseUrl`, so bypass <Link>'s automatic baseUrl prefixing.
-        isSingleSpokeBuild
+        SPOKE
           ? {
               href: '/',
               prependBaseUrlToHref: false,

@@ -112,24 +112,39 @@ jobs:
           sparse-checkout: .github/actions
           persist-credentials: false
       - uses: ./.github/actions/setup-build
-      - name: Build full site (multi-spoke, source spoke pinned to PR commit)
+      - name: Build all spokes (source spoke pinned to PR commit)
         env:
+          BUILD_ALL_SPOKES: '1'
           SPOKE_OVERRIDES: ${{ needs.validate-input.outputs.source_repo }}:${{ needs.validate-input.outputs.commit_sha }}
           SITE_URL: ${{ secrets.DEV_URL }}
-          BASE_URL: /pr/${{ needs.validate-input.outputs.spoke_id }}/${{ needs.validate-input.outputs.pr_number }}
+          BASE_URL: /pr/${{ needs.validate-input.outputs.spoke_id }}/${{ needs.validate-input.outputs.pr_number }}/
         run: npm run build
-      - name: Deploy preview
+      - name: Deploy spoke artifacts under pr/<id>/<N>/
         uses: ./.github/actions/aws-deploy
         with:
           role:   ${{ secrets.DEV_ROLE }}
           bucket: ${{ secrets.DEV_BUCKET }}
           path:   pr/${{ needs.validate-input.outputs.spoke_id }}/${{ needs.validate-input.outputs.pr_number }}
 
+  preview-deploy-hub:
+    needs:
+      - validate-input
+      - preview-build-deploy
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/deploy-hub.yml
+    secrets: inherit
+    with:
+      target_environment: dev
+      target_path: pr/${{ needs.validate-input.outputs.spoke_id }}/${{ needs.validate-input.outputs.pr_number }}
+
   preview-comment-success:
     runs-on: ubuntu-latest
     needs:
       - validate-input
       - preview-build-deploy
+      - preview-deploy-hub
     permissions:
       contents: read
     environment:
@@ -169,8 +184,8 @@ jobs:
       - uses: ./.github/actions/setup-build
       - name: Build spoke artifact
         env:
+          SPOKE: ${{ needs.validate-input.outputs.spoke_id }}
           SPOKE_OVERRIDES: ${{ needs.validate-input.outputs.source_repo }}:${{ needs.validate-input.outputs.commit_sha }}
-          ONLY_SPOKES: ${{ needs.validate-input.outputs.spoke_id }}
           SITE_URL: ${{ secrets.DEV_URL }}
           BASE_URL: /${{ needs.validate-input.outputs.spoke_route_base_path }}/
         run: npm run build
@@ -189,6 +204,18 @@ jobs:
           path:   pr/${{ needs.validate-input.outputs.spoke_id }}/${{ needs.validate-input.outputs.pr_number }}
           mode:   rm
 
+  merge-deploy-hub:
+    needs:
+      - validate-input
+      - merge-build-deploy
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/deploy-hub.yml
+    secrets: inherit
+    with:
+      target_environment: dev
+
   release-build-deploy:
     runs-on: ubuntu-latest
     needs: validate-input
@@ -206,8 +233,8 @@ jobs:
       - uses: ./.github/actions/setup-build
       - name: Build versioned spoke artifact
         env:
+          SPOKE: ${{ needs.validate-input.outputs.spoke_id }}
           SPOKE_OVERRIDES: ${{ needs.validate-input.outputs.source_repo }}:${{ needs.validate-input.outputs.commit_sha }}
-          ONLY_SPOKES: ${{ needs.validate-input.outputs.spoke_id }}
           SITE_URL: ${{ secrets.PROD_URL }}
           BASE_URL: /${{ needs.validate-input.outputs.spoke_route_base_path }}/${{ needs.validate-input.outputs.spoke_version }}/
         run: npm run build
@@ -243,6 +270,18 @@ jobs:
           aws s3 cp /tmp/redirect.html "$BUCKET/$SPOKE_PATH/index.html" \
             --content-type "text/html; charset=utf-8" \
             --cache-control "public, max-age=300"
+
+  release-deploy-hub:
+    needs:
+      - validate-input
+      - release-build-deploy
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/deploy-hub.yml
+    secrets: inherit
+    with:
+      target_environment: prod
 
   close-cleanup:
     runs-on: ubuntu-latest

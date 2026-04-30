@@ -53,14 +53,14 @@ Two S3 buckets, each fronted by its own CloudFront distribution.
 
 ## Build modes
 
-The site can be built in three shapes, depending on what's being
-published:
+The site can be built in three shapes. Exactly one mode env var must be
+set; the build aborts otherwise.
 
-| Mode | Used by | What it produces |
+| Env | Used by | What it produces |
 |---|---|---|
-| Hub-only | `deploy-hub.yml` | Just the hub landing page, 404, and shared assets. |
-| Single-spoke | `deploy-spoke.yml` (merge / release) | One spoke's docs, served standalone at the spoke's URL prefix (`<bucket>/<spoke>/` or `<bucket>/<spoke>/<vX.Y>/`). |
-| Multi-spoke | `deploy-spoke.yml` (preview) | Hub landing plus every spoke under its `routeBasePath`. |
+| `HUB_ONLY=1` | `deploy-hub.yml` | Just the hub landing page, 404, and shared assets. |
+| `SPOKE=<id>` | `deploy-spoke.yml` (merge / release) | One spoke's docs, served standalone at the spoke's URL prefix (`<bucket>/<spoke>/` or `<bucket>/<spoke>/<vX.Y>/`). |
+| `BUILD_ALL_SPOKES=1` | `deploy-spoke.yml` (preview) | Every spoke under its `routeBasePath`, no hub root. The hub root for a PR preview is layered on top by a chained `deploy-hub.yml` call. |
 
 ---
 
@@ -76,9 +76,10 @@ Trigger: PR labeled `deploy-doc-preview`, or new commit on a labeled PR.
 Hub workflow: [`deploy-spoke.yml`](.github/workflows/deploy-spoke.yml)
 (preview mode).
 
-Builds the full site with the source spoke pointed at the PR commit,
-deploys to `<DEV_BUCKET>/pr/<spoke>/<N>/`, and comments on the PR with
-the preview URL.
+Builds every spoke with the source spoke pointed at the PR commit,
+deploys each spoke subtree to `<DEV_BUCKET>/pr/<spoke>/<N>/<rbp>/`, then
+chains `deploy-hub.yml` to layer the hub root at the same prefix and
+comments on the PR with the preview URL.
 
 ### PR merge — `/` + `/<spoke>/`
 
@@ -87,9 +88,9 @@ label.
 Hub workflow: [`deploy-spoke.yml`](.github/workflows/deploy-spoke.yml)
 (merge mode).
 
-Publishes the merged spoke at `<DEV_BUCKET>/<spoke>/` and removes the PR
-preview. Hub root republishing is handled separately by
-[`deploy-hub.yml`](.github/workflows/deploy-hub.yml) on push to `main`.
+Publishes the merged spoke at `<DEV_BUCKET>/<spoke>/`, then chains
+`deploy-hub.yml` to refresh the dev hub root, and removes the PR
+preview.
 
 ### PR closed without merging — cleanup
 
@@ -109,7 +110,8 @@ Builds the spoke at the release commit and deploys it to
 `<PROD_BUCKET>/<spoke>/<vX.Y>/`. `<PROD_BUCKET>/<spoke>/index.html` is a
 redirect that always points at the most recently deployed spoke version.
 Patch releases overwrite their version prefix in place; older versions
-are untouched.
+are untouched. After the spoke deploy, `deploy-hub.yml` is chained to
+refresh the prod hub root.
 
 ### Hub root — `/`
 
@@ -119,7 +121,8 @@ Triggers:
 - Push to `main` that touches hub-owned paths → deploy to **dev**.
 - Push of a tag matching `v*` → deploy to **prod**.
 - `workflow_dispatch` → manual rerun.
-- `workflow_call` → reserved for future chaining.
+- `workflow_call` from `deploy-spoke.yml` → layer the hub root on top of
+  a freshly deployed spoke (preview / merge / release).
 
 This is the **only** workflow that publishes the hub root; existing
 spoke deployments at `<bucket>/<spoke>/` are preserved on every run.
@@ -154,17 +157,15 @@ Spokes additionally need `DOC_HUB_APP_ID`, `DOC_HUB_APP_PRIVATE_KEY`, and
 ./scripts/clone-spokes.sh \
   --use-local=openvinotoolkit/openvino.genai:/abs/path/to/openvino.genai
 
-# Full multi-spoke build (default — uses every spoke present in spokes/).
-npm run build
+# Multi-spoke build (matches PR preview).
+BUILD_ALL_SPOKES=1 BASE_URL=/ SITE_URL=https://docs.example.com npm run build
 
-# Single-spoke build (matches the release pipeline). Restrict the clone
-# to one spoke; the build then mounts it at /.
-./scripts/clone-spokes.sh --only=genai
-BASE_URL=/genai/v1.2/ SITE_URL=https://docs.example.com npx docusaurus build
+# Single-spoke build (matches merge / release pipeline). The spoke is
+# mounted at /.
+SPOKE=genai BASE_URL=/genai/v1.2/ SITE_URL=https://docs.example.com npm run build
 
-# Hub-only build (matches publish-hub.yml). Skip cloning entirely so no
-# spoke checkouts exist on disk.
-rm -rf spokes/* && npx docusaurus build
+# Hub-only build (matches deploy-hub.yml). Skips spoke cloning entirely.
+HUB_ONLY=1 BASE_URL=/ SITE_URL=https://docs.example.com npm run build
 ```
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full contributor

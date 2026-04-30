@@ -95,11 +95,22 @@ if [[ -n "${SPOKE_OVERRIDES:-}" ]]; then
   done
 fi
 
-# ONLY_SPOKES env var: whitespace-separated list of spoke ids. Mirrors --only.
-if [[ -n "${ONLY_SPOKES:-}" ]]; then
-  for id in $ONLY_SPOKES; do
-    [[ -n "$id" ]] && ONLY_IDS+=("$id")
-  done
+# Build mode (mirrors docusaurus.config.ts validation):
+#   BUILD_ALL_SPOKES=1 → clone every spoke
+#   SPOKE=<id>         → clone just that one
+# Exactly one must be set when HUB_ONLY is unset.
+BUILD_ALL_SPOKES_FLAG="${BUILD_ALL_SPOKES:-}"
+SPOKE_ID="${SPOKE:-}"
+if [[ "$BUILD_ALL_SPOKES_FLAG" == "1" && -n "$SPOKE_ID" ]]; then
+  echo "Error: BUILD_ALL_SPOKES=1 and SPOKE=$SPOKE_ID are mutually exclusive." >&2
+  exit 1
+fi
+if [[ "$BUILD_ALL_SPOKES_FLAG" != "1" && -z "$SPOKE_ID" ]]; then
+  echo "Error: set BUILD_ALL_SPOKES=1 or SPOKE=<id> (HUB_ONLY=1 already handled above)." >&2
+  exit 1
+fi
+if [[ -n "$SPOKE_ID" ]]; then
+  ONLY_IDS+=("$SPOKE_ID")
 fi
 
 is_only_id() {

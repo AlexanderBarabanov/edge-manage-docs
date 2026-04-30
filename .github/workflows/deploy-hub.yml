@@ -6,11 +6,32 @@ on:
     tags: ['v*']
   workflow_dispatch:
   workflow_call:
+    inputs:
+      target_environment:
+        description: 'dev or prod (selects AWS secrets).'
+        type: string
+        required: false
+        default: ''
+      target_path:
+        description: 'S3 prefix to deploy hub root into (no leading slash). Empty = bucket root.'
+        type: string
+        required: false
+        default: ''
+      site_url:
+        description: 'Override SITE_URL.'
+        type: string
+        required: false
+        default: ''
+      base_url:
+        description: 'Override BASE_URL (defaults to "/<target_path>/" or "/").'
+        type: string
+        required: false
+        default: ''
 
 permissions: {}
 
 concurrency:
-  group: deploy-hub-${{ startsWith(github.ref, 'refs/tags/') && 'prod' || 'dev' }}
+  group: deploy-hub-${{ inputs.target_environment || (startsWith(github.ref, 'refs/tags/') && 'prod' || 'dev') }}-${{ inputs.target_path || 'root' }}
   cancel-in-progress: true
 
 jobs:
@@ -59,32 +80,67 @@ jobs:
       id-token: write
       contents: read
     env:
-      AWS_ROLE: ${{ startsWith(github.ref, 'refs/tags/') && secrets.PROD_ROLE   || secrets.DEV_ROLE }}
-      BUCKET:   ${{ startsWith(github.ref, 'refs/tags/') && secrets.PROD_BUCKET || secrets.DEV_BUCKET }}
-      SITE_URL: ${{ startsWith(github.ref, 'refs/tags/') && secrets.PROD_URL    || secrets.DEV_URL }}
+      IS_PROD: ${{ inputs.target_environment == 'prod' || (inputs.target_environment == '' && startsWith(github.ref, 'refs/tags/')) }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: .github/actions
           persist-credentials: false
       - uses: ./.github/actions/setup-build
+      - name: Resolve deploy parameters
+        id: params
+        env:
+          INPUT_SITE_URL: ${{ inputs.site_url }}
+          INPUT_BASE_URL: ${{ inputs.base_url }}
+          INPUT_TARGET_PATH: ${{ inputs.target_path }}
+          DEFAULT_SITE_URL: ${{ env.IS_PROD == 'true' && secrets.PROD_URL || secrets.DEV_URL }}
+          AWS_ROLE: ${{ env.IS_PROD == 'true' && secrets.PROD_ROLE || secrets.DEV_ROLE }}
+          BUCKET:   ${{ env.IS_PROD == 'true' && secrets.PROD_BUCKET || secrets.DEV_BUCKET }}
+        run: |
+          set -euo pipefail
+          site_url="${INPUT_SITE_URL:-$DEFAULT_SITE_URL}"
+          target_path="${INPUT_TARGET_PATH%/}"
+          if [[ -n "$INPUT_BASE_URL" ]]; then
+            base_url="$INPUT_BASE_URL"
+          elif [[ -n "$target_path" ]]; then
+            base_url="/$target_path/"
+          else
+            base_url="/"
+          fi
+          {
+            echo "site_url=$site_url"
+            echo "base_url=$base_url"
+            echo "target_path=$target_path"
+            echo "aws_role=$AWS_ROLE"
+            echo "bucket=$BUCKET"
+          } >> "$GITHUB_OUTPUT"
       - name: Build hub-only docs
         env:
           HUB_ONLY: '1'
+          SITE_URL: ${{ steps.params.outputs.site_url }}
+          BASE_URL: ${{ steps.params.outputs.base_url }}
         run: npm run build
       - name: Build excludes for hub-root sync
         id: excludes
+        env:
+          TARGET_PATH: ${{ steps.params.outputs.target_path }}
         run: |
           set -euo pipefail
           {
             echo "patterns<<EOF"
-            echo "pr/*"
+            # Preserve spoke subtrees at any prefix.
             yq -r '.spokes[].routeBasePath | . + "/*"' spokes.yml
+            # At bucket root only, also preserve the PR preview tree.
+            if [[ -z "$TARGET_PATH" ]]; then
+              echo "pr/*"
+            fi
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-      - name: Deploy hub root, preserving spoke trees
+      - name: Deploy hub
         uses: ./.github/actions/aws-deploy
         with:
-          role:   ${{ env.AWS_ROLE }}
-          bucket: ${{ env.BUCKET }}
+          role:     ${{ steps.params.outputs.aws_role }}
+          bucket:   ${{ steps.params.outputs.bucket }}
+          path:     ${{ steps.params.outputs.target_path }}
           excludes: ${{ steps.excludes.outputs.patterns }}
+          delete:   ${{ steps.params.outputs.target_path == '' }}

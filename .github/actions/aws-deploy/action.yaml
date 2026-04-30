@@ -30,6 +30,10 @@ inputs:
         genai/*
     required: false
     default: ''
+  delete:
+    description: 'Pass --delete to `aws s3 sync` (mode=sync only). Set to "false" to add files without removing existing ones.'
+    required: false
+    default: 'true'
   region:
     description: 'AWS region.'
     required: false
@@ -53,6 +57,7 @@ runs:
         SOURCE: ${{ inputs.source }}
         MODE: ${{ inputs.mode }}
         EXCLUDES: ${{ inputs.excludes }}
+        DELETE: ${{ inputs.delete }}
       run: |
         set -euo pipefail
         # Trim trailing slash on path; "$BUCKET/" is the canonical bucket root.
@@ -60,12 +65,13 @@ runs:
         case "$MODE" in
           sync)
             args=()
+            [[ "$DELETE" == "true" ]] && args+=(--delete)
             while IFS= read -r pattern; do
               [[ -z "$pattern" ]] && continue
               args+=(--exclude "$pattern")
             done <<< "$EXCLUDES"
             set -f
-            aws s3 sync --delete "$SOURCE" "$target" "${args[@]}"
+            aws s3 sync "$SOURCE" "$target" "${args[@]}"
             ;;
           rm)
             set -f
