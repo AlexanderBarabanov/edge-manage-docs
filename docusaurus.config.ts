@@ -38,7 +38,7 @@ const spokes: SpokeConfig[] = allSpokes.filter((s) => {
     return false;
   }
 });
-const isHubOnlyBuild = process.env.HUB_ONLY === '1' || spokes.length === 0;
+const isHubOnlyBuild = process.env.HUB_ONLY === '1';
 
 // ONLY_SPOKES set → produce a self-contained spoke artifact: the listed
 // spoke(s) own `/`, the hub root landing is dropped. The artifact is then
