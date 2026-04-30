@@ -58,8 +58,6 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    environment:
-      name: ${{ startsWith(github.ref, 'refs/tags/') && 'publish-release' || 'publish-preview' }}
     env:
       AWS_ROLE: ${{ startsWith(github.ref, 'refs/tags/') && secrets.PROD_ROLE   || secrets.DEV_ROLE }}
       BUCKET:   ${{ startsWith(github.ref, 'refs/tags/') && secrets.PROD_BUCKET || secrets.DEV_BUCKET }}
@@ -69,14 +67,11 @@ jobs:
         with:
           sparse-checkout: .github/actions
           persist-credentials: false
-
       - uses: ./.github/actions/setup-build
-
       - name: Build hub-only docs
         env:
           HUB_ONLY: '1'
         run: npm run build
-
       - name: Build excludes for hub-root sync
         id: excludes
         run: |
@@ -87,10 +82,9 @@ jobs:
             yq -r '.spokes[].routeBasePath | . + "/*"' spokes.yml
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-
       - name: Deploy hub root, preserving spoke trees
         uses: ./.github/actions/aws-deploy
         with:
-          role: ${{ env.AWS_ROLE }}
+          role:   ${{ env.AWS_ROLE }}
           bucket: ${{ env.BUCKET }}
           excludes: ${{ steps.excludes.outputs.patterns }}
