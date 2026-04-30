@@ -86,9 +86,9 @@ outputs:
   tag:
     description: 'Validated release tag'
     value: ${{ steps.validate.outputs.tag }}
-  minor:
+  spoke_version:
     description: 'vMAJOR.MINOR derived from `tag` (publish-release only)'
-    value: ${{ steps.validate.outputs.minor }}
+    value: ${{ steps.validate.outputs.spoke_version }}
   mode:
     description: '`preview` or `merge` (deploy-preview only)'
     value: ${{ steps.validate.outputs.mode }}
@@ -196,14 +196,19 @@ runs:
           echo "Mode: $MODE"
         fi
 
-        # --- Tag → minor (publish-release only). --------------------------
-        MINOR=""
+        # --- Tag → spoke_version (publish-release only). -----------------
+        SPOKE_VERSION=""
         if [[ "$EVENT_TYPE" == "publish-release" ]]; then
           if [[ ! "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
             echo "Error: Tag '$TAG' does not match required format vMAJOR.MINOR.PATCH"
             exit 1
           fi
-          MINOR="v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+          SPOKE_VERSION="v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+          MODE="release"
+        fi
+
+        if [[ "$EVENT_TYPE" == "close-preview" ]]; then
+          MODE="close"
         fi
 
         # --- Spoke lookup from spokes.yml via yq. -------------------------
@@ -265,7 +270,7 @@ runs:
             fi
             [[ "$TAG_COMMIT" == "$COMMIT_SHA" ]] \
               || { echo "Error: Tag '$TAG' points at $TAG_COMMIT, not $COMMIT_SHA"; exit 1; }
-            echo "✅ Release validated: $SOURCE_REPO@$TAG → $SPOKE_ID/$MINOR/"
+            echo "✅ Release validated: $SOURCE_REPO@$TAG → $SPOKE_ID/$SPOKE_VERSION/"
             ;;
           close-preview)
             : # No further checks needed; cleanup is keyed solely on PR number + spoke.
@@ -283,7 +288,7 @@ runs:
           echo "branch=$BRANCH"
           echo "commit_sha=$COMMIT_SHA"
           echo "tag=$TAG"
-          echo "minor=$MINOR"
+          echo "spoke_version=$SPOKE_VERSION"
           echo "mode=$MODE"
           echo "spoke_id=$SPOKE_ID"
           echo "spoke_route_base_path=$SPOKE_RBP"

@@ -203,7 +203,7 @@ spokes:
 | `label` | yes | Text for the navbar entry. |
 | `paths` | yes | Sparse-checkout paths. At minimum `docs/`. Add `samples/` if you use the samples plugin. |
 
-That's it for Tier 1–4 spokes. `npm run build` clones, builds, and serves them.
+That's it for Tier 1–4 spokes. `BUILD_ALL_SPOKES=1 npm run build` clones, builds, and serves them.
 
 ## 2. Opt in to the samples plugin (Tier 5 only)
 
@@ -237,7 +237,7 @@ To build the hub against a specific spoke branch or commit without editing `spok
 # exact commit SHA (e.g. from a repository_dispatch payload)
 ./scripts/clone-spokes.sh --override=owner/my-project:bed3e544f5090be69e6a1594f3da24d2d9b6ad9a
 
-npm run build
+BUILD_ALL_SPOKES=1 npm run build
 ```
 
 `--override` is repeatable, so a dispatch that pins multiple spokes can pass one override per spoke. Unspecified spokes keep their `ref` from `spokes.yml`.
@@ -247,22 +247,22 @@ npm run build
 When a spoke's CI changes docs, the spoke dispatches a `repository_dispatch` event to the hub with its `{ repo, branch, sha }` payload. The hub's preview workflow:
 
 1. Checks out the hub at its default branch.
-2. Builds each `--override=<repo>:<sha>` argument from the dispatch payload (one per spoke targeted by the event). Using the SHA — not the branch name — locks the preview to the exact commit that triggered it.
-3. Runs `./scripts/clone-spokes.sh --override=<repo>:<sha> ...`, which clones that spoke at the given SHA while all other spokes are cloned at their `spokes.yml` ref.
-4. Runs `npm run build` and publishes the resulting `build/` directory to the preview environment.
-
-The hub therefore always builds the full site, with only the dispatching spoke pinned to a pre-merge commit.
+2. Sets `SPOKE_OVERRIDES=<repo>:<sha>` for the dispatching spoke. Using the SHA — not the branch name — locks the preview to the exact commit that triggered it.
+3. Runs `BUILD_ALL_SPOKES=1 npm run build`, which clones every spoke (the dispatching spoke at the override SHA, the rest at their `spokes.yml` ref) and produces `build/<spoke>/...` for each.
+4. Deploys each spoke subtree under `pr/<spoke>/<N>/<rbp>/`, then chains `deploy-hub.yml` to layer the hub root at the same prefix.
 
 ## Build and serve
 
 From the hub repo:
 
 ```bash
-npm install             # once
-npm run build           # prebuild (clone + gen-samples) + docusaurus build
-npm run serve           # serve build/ at http://localhost:3000/
+npm install                          # once
+BUILD_ALL_SPOKES=1 npm run build     # prebuild (clone + gen-samples) + docusaurus build
+npm run serve                        # serve build/ at http://localhost:3000/
 # or
-npm start               # prebuild + docusaurus start (hot reload)
+BUILD_ALL_SPOKES=1 npm start         # prebuild + docusaurus start (hot reload)
 ```
+
+Use `SPOKE=<id>` for a single-spoke build or `HUB_ONLY=1` for just the hub landing. Exactly one mode env var must be set or the build aborts.
 
 Requirements: Node 22, `git`, and `git-lfs` if any spoke uses LFS.

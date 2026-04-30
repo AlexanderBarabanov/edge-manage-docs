@@ -22,52 +22,48 @@ type SpokesYml = {
 };
 
 const REPO_ROOT = __dirname;
-const SPOKES_DIR = 'spokes'; // Relative to REPO_ROOT; populated by scripts/clone-spokes.sh.
+const SPOKES_DIR = 'spokes';
 
 const allSpokes: SpokeConfig[] = (
   yamlLoad(readFileSync(path.join(REPO_ROOT, 'spokes.yml'), 'utf8')) as SpokesYml
 ).spokes;
 
-// The build mode is derived purely from what's on disk under spokes/:
-//
-//   0 checkouts                          → hub-only build (top-level shell, no spokes;
-//                                          src/pages/index.tsx + 404 + shared assets).
-//   ≥1 checkouts, no `.single-spoke`     → multi-spoke build (hub root + each spoke under
-//                                          its declared routeBasePath). Used for previews.
-//   ≥1 checkouts, `.single-spoke` file   → single-spoke build (the spoke owns `/`, hub
-//                                          root dropped). The marker is written by
-//                                          clone-spokes.sh whenever its clone is
-//                                          restricted (--only / ONLY_SPOKES) and removed
-//                                          on every unrestricted run, so it's purely a
-//                                          filesystem record of how the script was
-//                                          invoked — no env-var coupling at build time.
-//
-// Used by:
-//   publish-hub.yml      — does not run clone-spokes.sh                  → hub-only
-//   publish-preview.yml  — preview: clones every spoke                   → multi-spoke
-//   publish-preview.yml  — merge:   clone-spokes.sh --only=<spoke>        → single-spoke
-//   publish-release.yml  — clone-spokes.sh --only=<spoke>                 → single-spoke
-//
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const fs = require('fs') as typeof import('fs');
-const spokes: SpokeConfig[] = allSpokes.filter((s) => {
-  try {
-    fs.statSync(path.join(REPO_ROOT, SPOKES_DIR, s.repo.split('/').pop()!));
-    return true;
-  } catch {
-    return false;
-  }
-});
-const isHubOnlyBuild = spokes.length === 0;
-const isSingleSpokeBuild =
-  spokes.length > 0 &&
-  fs.existsSync(path.join(REPO_ROOT, SPOKES_DIR, '.single-spoke'));
 
-// In single-spoke mode the spoke owns the entire site, so its docs and
-// landing page are mounted at `/` rather than under their declared
-// routeBasePath.
+// Exactly one of these three modes must be selected. No defaults, no fallbacks.
+//   HUB_ONLY=1         → emit only the hub root landing.
+//   BUILD_ALL_SPOKES=1 → emit every spoke under its routeBasePath, no hub.
+//   SPOKE=<id>         → emit one spoke mounted at `/`, no hub.
+const HUB_ONLY = process.env.HUB_ONLY === '1';
+const BUILD_ALL_SPOKES = process.env.BUILD_ALL_SPOKES === '1';
+const SPOKE = (process.env.SPOKE ?? '').trim();
+
+const modesSet = [HUB_ONLY, BUILD_ALL_SPOKES, !!SPOKE].filter(Boolean).length;
+if (modesSet !== 1) {
+  throw new Error(
+    'Exactly one build mode must be set: HUB_ONLY=1, BUILD_ALL_SPOKES=1, or SPOKE=<id>.',
+  );
+}
+if (SPOKE && !allSpokes.some((s) => s.id === SPOKE)) {
+  throw new Error(`SPOKE='${SPOKE}' not found in spokes.yml.`);
+}
+
+const spokes: SpokeConfig[] = HUB_ONLY
+  ? []
+  : BUILD_ALL_SPOKES
+    ? allSpokes
+    : allSpokes.filter((s) => s.id === SPOKE);
+
+for (const s of spokes) {
+  const dir = path.join(REPO_ROOT, SPOKES_DIR, s.repo.split('/').pop()!);
+  if (!fs.existsSync(dir)) {
+    throw new Error(`Spoke '${s.id}' (${s.repo}) not checked out at ${dir}.`);
+  }
+}
+
 const effectiveRouteBasePath = (spoke: SpokeConfig): string =>
-  isSingleSpokeBuild ? '/' : spoke.routeBasePath;
+  SPOKE ? '/' : spoke.routeBasePath;
 
 function spokeCheckoutDir(spoke: SpokeConfig): string {
   // Matches clone-spokes.sh: basename(repo) under spokes/.
@@ -210,16 +206,11 @@ const config: Config = {
     [
       'classic',
       {
-        // In hub-only builds there are no spoke checkouts to mount docs from,
-        // so we disable the classic preset's docs plugin entirely. The 404
-        // page and other theme features that default to `pluginId="default"`
-        // gracefully degrade when no docs plugin is registered.
-        docs: isHubOnlyBuild ? false : docsPluginOptions(firstSpoke),
+        docs: HUB_ONLY ? false : docsPluginOptions(firstSpoke),
         blog: false,
-        // In single-spoke builds the hub root landing (src/pages/index.tsx)
-        // must not be emitted: the build is deployed under <bucket>/<spoke>/
-        // (or .../<spoke>/<vX.Y>/) and `/` belongs to the spoke itself.
-        pages: isSingleSpokeBuild ? false : undefined,
+        // Hub landing is owned by the hub-only build. Spoke artifacts
+        // (single or all-spokes) never include hub pages.
+        pages: HUB_ONLY ? undefined : false,
         theme: { customCss: './src/css/custom.css' },
       } satisfies Preset.Options,
     ],
@@ -231,7 +222,7 @@ const config: Config = {
     // The search theme's <SearchBar> hooks into the docs plugin's global
     // data. In hub-only builds there's no docs plugin, so we drop the
     // search theme entirely (the hub landing has no content to search).
-    ...(isHubOnlyBuild
+    ...(HUB_ONLY
       ? []
       : ([
           [
@@ -251,14 +242,10 @@ const config: Config = {
       title: 'Edge Docs',
       logo: { alt: 'Intel logo', src: 'img/intel-logo.svg' },
       items: [
-        // "Home" links back to the hub root. In multi-spoke / hub-only
-        // builds the hub root is part of the same artifact, so a relative
-        // `to: '/'` works. In single-spoke builds the artifact is deployed
-        // under `<bucket>/<spoke>/<vX.Y>/` while the hub still lives at
-        // `<bucket>/`, so we need a literal absolute `/` that doesn't get
-        // prefixed with `baseUrl`. `autoAddBaseUrl: false` is forwarded
-        // by the navbar to `<Link>`, which then emits `<a href="/">`.
-        isSingleSpokeBuild
+        // Single-spoke artifact lives under `<bucket>/<rbp>/[<vX.Y>/]`,
+        // hub at `<bucket>/`. We need an absolute `/` not prefixed with
+        // `baseUrl`, so bypass <Link>'s automatic baseUrl prefixing.
+        SPOKE
           ? {
               href: '/',
               prependBaseUrlToHref: false,

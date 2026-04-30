@@ -38,29 +38,29 @@ Two S3 buckets, each fronted by its own CloudFront distribution.
 <PROD_BUCKET>/
 ├── index.html                 ← hub root landing (multi-spoke shell)
 ├── <spoke>/
-│   ├── index.html             ← redirect to the latest minor
-│   ├── v1.0/                  ← immutable per-minor releases
+│   ├── index.html             ← redirect to the latest spoke version
+│   ├── v1.0/                  ← immutable per-spoke-version releases
 │   ├── v1.1/
 │   └── v1.2/
 ```
 
 - Each `<spoke>/<vX.Y>/` is built once per release tag, then overwritten
-  in place when a patch on that minor lands.
+  in place when a patch on that version lands.
 - `<spoke>/index.html` is a meta-refresh redirect that always points at
-  the most recently deployed minor of that spoke.
+  the most recently deployed version of that spoke.
 
 ---
 
 ## Build modes
 
-The site can be built in three shapes, depending on what's being
-published:
+The site can be built in three shapes. Exactly one mode env var must be
+set; the build aborts otherwise.
 
-| Mode | Used by | What it produces |
+| Env | Used by | What it produces |
 |---|---|---|
-| Hub-only | `publish-hub.yml` | Just the hub landing page, 404, and shared assets. |
-| Single-spoke | `publish-preview.yml` (merge) and `publish-release.yml` | One spoke's docs, served standalone at the spoke's URL prefix (`<bucket>/<spoke>/` or `<bucket>/<spoke>/<vX.Y>/`). |
-| Multi-spoke | `publish-preview.yml` (preview) | Hub landing plus every spoke under its `routeBasePath`. |
+| `HUB_ONLY=1` | `deploy-hub.yml` | Just the hub landing page, 404, and shared assets. |
+| `SPOKE=<id>` | `deploy-spoke.yml` (merge / release) | One spoke's docs, served standalone at the spoke's URL prefix (`<bucket>/<spoke>/` or `<bucket>/<spoke>/<vX.Y>/`). |
+| `BUILD_ALL_SPOKES=1` | `deploy-spoke.yml` (preview) | Every spoke under its `routeBasePath`, no hub root. The hub root for a PR preview is layered on top by a chained `deploy-hub.yml` call. |
 
 ---
 
@@ -73,51 +73,56 @@ shared GitHub App).
 ### PR preview — `pr/<spoke>/<N>/`
 
 Trigger: PR labeled `deploy-doc-preview`, or new commit on a labeled PR.
-Hub workflow: [`publish-preview.yml`](.github/workflows/publish-preview.yml)
+Hub workflow: [`deploy-spoke.yml`](.github/workflows/deploy-spoke.yml)
 (preview mode).
 
-Builds the full site with the source spoke pointed at the PR commit,
-deploys to `<DEV_BUCKET>/pr/<spoke>/<N>/`, and comments on the PR with
-the preview URL.
+Builds every spoke with the source spoke pointed at the PR commit,
+deploys each spoke subtree to `<DEV_BUCKET>/pr/<spoke>/<N>/<rbp>/`, then
+chains `deploy-hub.yml` to layer the hub root at the same prefix and
+comments on the PR with the preview URL.
 
 ### PR merge — `/` + `/<spoke>/`
 
 Trigger: PR closed with `merged == true` and the `deploy-doc-preview`
 label.
-Hub workflow: [`publish-preview.yml`](.github/workflows/publish-preview.yml)
+Hub workflow: [`deploy-spoke.yml`](.github/workflows/deploy-spoke.yml)
 (merge mode).
 
-Publishes the merged spoke at `<DEV_BUCKET>/<spoke>/`, removes the PR
-preview, and chains into [`publish-hub.yml`](.github/workflows/publish-hub.yml)
-to refresh the hub root.
+Publishes the merged spoke at `<DEV_BUCKET>/<spoke>/`, then chains
+`deploy-hub.yml` to refresh the dev hub root, and removes the PR
+preview.
 
 ### PR closed without merging — cleanup
 
 Trigger: PR closed, not merged.
-Hub workflow: [`close-preview.yml`](.github/workflows/close-preview.yml).
+Hub workflow: [`deploy-spoke.yml`](.github/workflows/deploy-spoke.yml)
+(close mode).
 
 Removes `<DEV_BUCKET>/pr/<spoke>/<N>/`.
 
 ### Release — `<spoke>/<vX.Y>/`
 
 Trigger: tag push matching `v[0-9]+.[0-9]+.[0-9]+`.
-Hub workflow: [`publish-release.yml`](.github/workflows/publish-release.yml).
+Hub workflow: [`deploy-spoke.yml`](.github/workflows/deploy-spoke.yml)
+(release mode).
 
 Builds the spoke at the release commit and deploys it to
 `<PROD_BUCKET>/<spoke>/<vX.Y>/`. `<PROD_BUCKET>/<spoke>/index.html` is a
-redirect that always points at the most recently deployed minor. Patch
-releases overwrite their minor in place; older minors are untouched.
+redirect that always points at the most recently deployed spoke version.
+Patch releases overwrite their version prefix in place; older versions
+are untouched. After the spoke deploy, `deploy-hub.yml` is chained to
+refresh the prod hub root.
 
 ### Hub root — `/`
 
-Hub workflow: [`publish-hub.yml`](.github/workflows/publish-hub.yml).
+Hub workflow: [`deploy-hub.yml`](.github/workflows/deploy-hub.yml).
 
 Triggers:
 - Push to `main` that touches hub-owned paths → deploy to **dev**.
-- `workflow_dispatch` with `environment: dev | prod` → deploy to either
-  bucket (used to bootstrap a new bucket or promote hub changes to prod).
-- `workflow_call` from the PR-merge flow → republish dev after a spoke
-  merge.
+- Push of a tag matching `v*` → deploy to **prod**.
+- `workflow_dispatch` → manual rerun.
+- `workflow_call` from `deploy-spoke.yml` → layer the hub root on top of
+  a freshly deployed spoke (preview / merge / release).
 
 This is the **only** workflow that publishes the hub root; existing
 spoke deployments at `<bucket>/<spoke>/` are preserved on every run.
@@ -126,10 +131,9 @@ spoke deployments at `<bucket>/<spoke>/` are preserved on every run.
 
 ## Concurrency
 
-All three dev workflows share a `concurrency` group keyed on
-`<source_repo>-<pr_number>`, so a `merge` event for a PR will never race
-the `preview` deploy for the same PR or its `close` cleanup. Releases
-serialise per spoke (`publish-release-<source_repo>`).
+`deploy-spoke.yml` runs share a `concurrency` group keyed on
+`<source_repo>-<pr_number|tag>`, so preview / merge / close events for
+the same PR never race, and releases serialise per tag.
 
 ---
 
@@ -153,17 +157,15 @@ Spokes additionally need `DOC_HUB_APP_ID`, `DOC_HUB_APP_PRIVATE_KEY`, and
 ./scripts/clone-spokes.sh \
   --use-local=openvinotoolkit/openvino.genai:/abs/path/to/openvino.genai
 
-# Full multi-spoke build (default — uses every spoke present in spokes/).
-npm run build
+# Multi-spoke build (matches PR preview).
+BUILD_ALL_SPOKES=1 BASE_URL=/ SITE_URL=https://docs.example.com npm run build
 
-# Single-spoke build (matches the release pipeline). Restrict the clone
-# to one spoke; the build then mounts it at /.
-./scripts/clone-spokes.sh --only=genai
-BASE_URL=/genai/v1.2/ SITE_URL=https://docs.example.com npx docusaurus build
+# Single-spoke build (matches merge / release pipeline). The spoke is
+# mounted at /.
+SPOKE=genai BASE_URL=/genai/v1.2/ SITE_URL=https://docs.example.com npm run build
 
-# Hub-only build (matches publish-hub.yml). Skip cloning entirely so no
-# spoke checkouts exist on disk.
-rm -rf spokes/* && npx docusaurus build
+# Hub-only build (matches deploy-hub.yml). Skips spoke cloning entirely.
+HUB_ONLY=1 BASE_URL=/ SITE_URL=https://docs.example.com npm run build
 ```
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full contributor

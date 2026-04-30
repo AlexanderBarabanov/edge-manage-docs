@@ -79,6 +79,13 @@ if [[ -n "$LEGACY_OVERRIDE_REPO" && -n "$LEGACY_OVERRIDE_REF" ]]; then
   add_override "${LEGACY_OVERRIDE_REPO}:${LEGACY_OVERRIDE_REF}"
 fi
 
+# HUB_ONLY=1 — skip cloning entirely. Used by deploy-hub.yml so the
+# subsequent docusaurus build emits just the hub landing.
+if [[ "${HUB_ONLY:-}" == "1" ]]; then
+  echo "HUB_ONLY=1: skipping spoke cloning."
+  exit 0
+fi
+
 # SPOKE_OVERRIDES env var: whitespace-separated list of OWNER/NAME:REF specs.
 # Lets callers pass overrides through wrappers that don't forward argv
 # (e.g. `npm run build`, whose lifecycle auto-runs `prebuild` with no args).
@@ -88,11 +95,22 @@ if [[ -n "${SPOKE_OVERRIDES:-}" ]]; then
   done
 fi
 
-# ONLY_SPOKES env var: whitespace-separated list of spoke ids. Mirrors --only.
-if [[ -n "${ONLY_SPOKES:-}" ]]; then
-  for id in $ONLY_SPOKES; do
-    [[ -n "$id" ]] && ONLY_IDS+=("$id")
-  done
+# Build mode (mirrors docusaurus.config.ts validation):
+#   BUILD_ALL_SPOKES=1 → clone every spoke
+#   SPOKE=<id>         → clone just that one
+# Exactly one must be set when HUB_ONLY is unset.
+BUILD_ALL_SPOKES_FLAG="${BUILD_ALL_SPOKES:-}"
+SPOKE_ID="${SPOKE:-}"
+if [[ "$BUILD_ALL_SPOKES_FLAG" == "1" && -n "$SPOKE_ID" ]]; then
+  echo "Error: BUILD_ALL_SPOKES=1 and SPOKE=$SPOKE_ID are mutually exclusive." >&2
+  exit 1
+fi
+if [[ "$BUILD_ALL_SPOKES_FLAG" != "1" && -z "$SPOKE_ID" ]]; then
+  echo "Error: set BUILD_ALL_SPOKES=1 or SPOKE=<id> (HUB_ONLY=1 already handled above)." >&2
+  exit 1
+fi
+if [[ -n "$SPOKE_ID" ]]; then
+  ONLY_IDS+=("$SPOKE_ID")
 fi
 
 is_only_id() {
@@ -137,17 +155,6 @@ if ! command -v git-lfs >/dev/null; then
 fi
 
 mkdir -p "$ROOT_DIR/spokes"
-
-# Sentinel file: when the clone is restricted to a subset of spokes
-# (release / merge-mode preview), drop a marker so docusaurus.config.ts
-# can detect single-spoke mode from the filesystem alone — no env var.
-# Removed unconditionally first so a subsequent unrestricted clone
-# resets the build mode back to multi-spoke.
-SENTINEL="$ROOT_DIR/spokes/.single-spoke"
-rm -f "$SENTINEL"
-if [[ ${#ONLY_IDS[@]} -gt 0 ]]; then
-  : > "$SENTINEL"
-fi
 
 # Parse spokes.yml line by line
 CURRENT_REPO=""
