@@ -191,9 +191,9 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-build
-      - name: Build spoke at preview prefix
+      - name: Build hub + all spokes at preview prefix
         env:
-          SPOKE: ${{ needs.validate-input.outputs.spoke_id }}
+          BUILD_ALL_SPOKES: '1'
           SPOKE_OVERRIDES: ${{ needs.validate-input.outputs.source_repo }}:${{ needs.validate-input.outputs.commit_sha }}
           SITE_URL: ${{ secrets.DEV_URL }}
           BASE_URL: /pr/${{ needs.validate-input.outputs.spoke_id }}/${{ needs.validate-input.outputs.pr_number }}/
