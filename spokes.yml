@@ -1,19 +1,21 @@
 spokes:
   - repo: AlexanderBarabanov/openvino.genai
-    ref: mpryakhin/spoke-impl
+    ref: mpryakhin/versioning-support
     id: genai
     routeBasePath: genai
     label: GenAI
     paths:
       - docs/
+      - docs-versions/
       - samples/
     prebuildCommands:
       - generate-samples-docs:genai-samples-docs-plugin
 
   - repo: AlexanderBarabanov/openvino
-    ref: ivanzati/prepare-unified-docs
+    ref: test-docs-deploy
     id: openvino
     routeBasePath: openvino
     label: OpenVINO Toolkit
     paths:
       - docs/
+      - docs-versions/

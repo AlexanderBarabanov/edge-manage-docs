@@ -10,6 +10,16 @@
 # Cloned spoke repositories (populated at build time)
 /spokes
 
+# Versioning symlinks created by clone-spokes.sh from each spoke's
+# docs-versions/. Default plugin uses unprefixed names; non-default plugins
+# use `<id>_` (with `id` from spokes.yml) — keep both forms ignored.
+/versions.json
+/versioned_docs
+/versioned_sidebars
+/*_versions.json
+/*_versioned_docs
+/*_versioned_sidebars
+
 # Generated files
 .docusaurus
 .cache-loader
