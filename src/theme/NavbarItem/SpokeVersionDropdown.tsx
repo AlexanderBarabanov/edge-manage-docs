@@ -1,22 +1,57 @@
 import React from 'react';
 import {useLocation} from '@docusaurus/router';
-import DocsVersionDropdownNavbarItem from '@theme-original/NavbarItem/DocsVersionDropdownNavbarItem';
+import {useVersions, useActiveVersion} from '@docusaurus/plugin-content-docs/client';
+import DropdownNavbarItem from '@theme/NavbarItem/DropdownNavbarItem';
 
-// Wraps the built-in docsVersionDropdown so the item is rendered only when
-// the current route lives under the owning spoke's `routeBasePath`. This
-// keeps the hub landing page free of any version selector and prevents the
-// other spokes' selectors from appearing while a user is browsing one
-// spoke's pages.
-type Props = React.ComponentProps<typeof DocsVersionDropdownNavbarItem> & {
-  routePrefix: string;
+// Always-on per-spoke version dropdown.
+//
+// The built-in `docsVersionDropdown` hides itself unless the active route
+// is served by its docs plugin, so it disappears on non-doc pages such as
+// the spoke's landing page (which is a content-page plugin route, not a
+// docs route). We want the selector to be visible on every page under the
+// spoke's `routeBasePath`, so we render our own dropdown driven by
+// `useVersions(pluginId)` and gate it purely on `pathname.startsWith()`.
+type Props = {
+  docsPluginId: string;
+  routePrefix: string;            // e.g. "/genai/" — base+rbp with trailing slash
+  position?: 'left' | 'right';
+  label?: string;
+  className?: string;
 };
 
-export default function SpokeVersionDropdown({routePrefix, ...rest}: Props): JSX.Element | null {
+export default function SpokeVersionDropdown({
+  docsPluginId,
+  routePrefix,
+  position = 'right',
+  label,
+  className,
+}: Props): JSX.Element | null {
   const {pathname} = useLocation();
-  // Match either '<routePrefix>' exactly or any sub-path under it.
-  const normalized = routePrefix.endsWith('/') ? routePrefix : `${routePrefix}/`;
-  if (pathname !== routePrefix && !pathname.startsWith(normalized)) {
-    return null;
-  }
-  return <DocsVersionDropdownNavbarItem {...rest} />;
+  const versions = useVersions(docsPluginId);
+  const activeVersion = useActiveVersion(docsPluginId);
+
+  // Only show under this spoke's routes (landing + docs + samples + …).
+  const trimmed = routePrefix.replace(/\/$/, '');
+  const inSpoke = pathname === trimmed || pathname.startsWith(`${trimmed}/`);
+  if (!inSpoke) return null;
+
+  // Single-version installs: nothing meaningful to switch between.
+  if (!versions || versions.length <= 1) return null;
+
+  const dropdownLabel = label ?? activeVersion?.label ?? versions[0]?.label ?? 'Versions';
+
+  const items = versions.map((v) => ({
+    label: v.label,
+    to: v.path,
+    isActive: () => activeVersion?.name === v.name,
+  }));
+
+  return (
+    <DropdownNavbarItem
+      position={position}
+      label={dropdownLabel}
+      items={items}
+      className={className}
+    />
+  );
 }
