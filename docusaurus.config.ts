@@ -232,6 +232,11 @@ const config: Config = {
   onBrokenLinks: 'warn',
   onBrokenMarkdownLinks: 'warn',
 
+  // S3 + CloudFront serves /foo/ as /foo/index.html but does NOT rewrite
+  // /foo to /foo/index.html. Generating links with a trailing slash keeps
+  // every internal nav working without a CloudFront Function.
+  trailingSlash: true,
+
   i18n: { defaultLocale: 'en', locales: ['en'] },
 
   presets: [
