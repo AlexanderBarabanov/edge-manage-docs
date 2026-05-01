@@ -1,6 +1,6 @@
 spokes:
   - repo: AlexanderBarabanov/openvino.genai
-    ref: mpryakhin/versioning-support
+    ref: master
     id: genai
     routeBasePath: genai
     label: GenAI
@@ -12,7 +12,7 @@ spokes:
       - generate-samples-docs:genai-samples-docs-plugin
 
   - repo: AlexanderBarabanov/openvino
-    ref: test-docs-deploy
+    ref: master
     id: openvino
     routeBasePath: openvino
     label: OpenVINO Toolkit
