@@ -40,11 +40,14 @@ export default function SpokeVersionDropdown({
 
   const dropdownLabel = label ?? activeVersion?.label ?? versions[0]?.label ?? 'Versions';
 
-  const items = versions.map((v) => ({
-    label: v.label,
-    to: v.path,
-    isActive: () => activeVersion?.name === v.name,
-  }));
+  const items = versions.map((v) => {
+    const mainDoc = v.docs.find((d) => d.id === v.mainDocId) ?? v.docs[0];
+    return {
+      label: v.label,
+      to: mainDoc?.path ?? v.path,
+      isActive: () => activeVersion?.name === v.name,
+    };
+  });
 
   return (
     <DropdownNavbarItem
