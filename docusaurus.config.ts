@@ -69,6 +69,18 @@ if (SPOKE_VERSION && !SPOKE_MODE) {
   throw new Error('SPOKE_VERSION requires SPOKE=<id>.');
 }
 
+// Resolved baseUrl for this build. Reused by navbar links so cross-bundle
+// hrefs include the correct prefix (e.g. /pr/<id>/<N>/<rbp>/ in previews).
+const BASE_URL: string = SPOKE_MODE
+  ? SPOKE_VERSION
+    ? `/${selectedSpoke!.routeBasePath}/${SPOKE_VERSION}/`
+    : process.env.BASE_URL
+      ? process.env.BASE_URL.replace(/\/?$/, '/')
+      : `/${selectedSpoke!.routeBasePath}/`
+  : process.env.BASE_URL
+    ? process.env.BASE_URL.replace(/\/?$/, '/')
+    : '/';
+
 const spokes: SpokeConfig[] = HUB_ONLY
   ? []
   : BUILD_ALL_SPOKES
@@ -206,13 +218,9 @@ const config: Config = {
   // without `--delete` wiping each other's assets:
   //   HUB_ONLY=1                       → / (or $BASE_URL).
   //   BUILD_ALL_SPOKES=1               → $BASE_URL (e.g. /pr/<id>/<N>/).
-  //   SPOKE=<id>                       → /<rbp>/.
+  //   SPOKE=<id>                       → /<rbp>/  (or $BASE_URL for previews).
   //   SPOKE=<id> + SPOKE_VERSION=vX.Y  → /<rbp>/<vX.Y>/.
-  baseUrl: SPOKE_MODE
-    ? `/${selectedSpoke!.routeBasePath}/${SPOKE_VERSION ? `${SPOKE_VERSION}/` : ''}`
-    : process.env.BASE_URL
-      ? process.env.BASE_URL.replace(/\/?$/, '/')
-      : '/',
+  baseUrl: BASE_URL,
 
   organizationName: 'open-edge-platform',
   projectName: 'edge-manage-docs',
@@ -291,16 +299,21 @@ const config: Config = {
               position: 'left' as const,
               target: '_self',
             },
+            // (Spoke bundles point Home back at the hub root, which is
+            // always at SITE_ORIGIN/ for production. Preview builds don't
+            // use SPOKE_MODE so no baseUrl prefixing is needed here.)
           ]
         : [
-            // HUB_ONLY / BUILD_ALL_SPOKES: the bundle owns the parent prefix
-            // (`/` for hub, `/pr/<id>/<N>/` for previews) so spokes inside
-            // it are reachable via Docusaurus' baseUrl-relative `to:`.
+            // Hub bundle. Each spoke is a separate Docusaurus bundle; using
+            // an absolute URL prevents Docusaurus' Link from attempting SPA
+            // navigation within the hub bundle (which has no route for the
+            // spoke and would render 404 until the user refreshes).
             { to: '/', label: 'Home', position: 'left' as const },
             ...allSpokes.map((spoke) => ({
-              to: `/${spoke.routeBasePath}/`,
+              href: `${SITE_ORIGIN}${BASE_URL}${spoke.routeBasePath}/`,
               label: spoke.label ?? spoke.id,
               position: 'left' as const,
+              target: '_self',
             })),
           ],
     },

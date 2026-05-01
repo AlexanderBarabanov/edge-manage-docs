@@ -1,4 +1,3 @@
-import Link from '@docusaurus/Link';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import Layout from '@theme/Layout';
 import Heading from '@theme/Heading';
@@ -26,14 +25,19 @@ export default function Home(): React.JSX.Element {
         </header>
         <section className={styles.grid}>
           {spokes.map((spoke) => (
-            <Link
+            // Each spoke is a separate Docusaurus bundle deployed under its
+            // own prefix. Use a plain <a> so the browser does a full
+            // navigation; @docusaurus/Link would attempt SPA routing inside
+            // the hub bundle (which has no route for the spoke) and render
+            // a 404 until the user refreshes.
+            <a
               key={spoke.id}
               className={styles.card}
-              to={`/${spoke.routeBasePath}/`}
+              href={`${siteConfig.baseUrl}${spoke.routeBasePath}/`}
             >
               <Heading as="h2">{spoke.label}</Heading>
               <p className={styles.repo}>{spoke.repo}</p>
-            </Link>
+            </a>
           ))}
         </section>
       </main>

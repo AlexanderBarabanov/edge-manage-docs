@@ -6,8 +6,8 @@ name: Deploy
 #
 #   push to main                → hub bundle  → bucket root (dev).
 #   push of v* tag              → hub bundle  → bucket root (prod).
-#   repository_dispatch preview → hub + every spoke (BUILD_ALL_SPOKES=1) at
-#                                  baseUrl=/pr/<id>/<N>/  →  pr/<id>/<N>/.
+#   repository_dispatch preview → spoke bundle at baseUrl=/pr/<id>/<N>/ →
+#                                  pr/<id>/<N>/.   (independent site)
 #   repository_dispatch merge   → hub bundle to bucket root  ‖  spoke bundle
 #                                  at baseUrl=/<rbp>/  →  <rbp>/.   (parallel)
 #   repository_dispatch release → hub bundle to bucket root  ‖  spoke bundle
@@ -157,7 +157,7 @@ jobs:
           bucket:   ${{ steps.secrets.outputs.bucket }}
           excludes: ${{ steps.excludes.outputs.patterns }}
 
-  # --- PR preview (single bundle, full ownership of pr/<id>/<N>/). ----------
+  # --- PR preview: spoke bundle at pr/<id>/<N>/ (independent site). --------
   preview-comment-start:
     needs: [validate-input]
     if: needs.validate-input.outputs.mode == 'preview'
@@ -191,9 +191,9 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-build
-      - name: Build hub + all spokes (source spoke pinned to PR commit)
+      - name: Build spoke at preview prefix
         env:
-          BUILD_ALL_SPOKES: '1'
+          SPOKE: ${{ needs.validate-input.outputs.spoke_id }}
           SPOKE_OVERRIDES: ${{ needs.validate-input.outputs.source_repo }}:${{ needs.validate-input.outputs.commit_sha }}
           SITE_URL: ${{ secrets.DEV_URL }}
           BASE_URL: /pr/${{ needs.validate-input.outputs.spoke_id }}/${{ needs.validate-input.outputs.pr_number }}/
@@ -266,7 +266,7 @@ jobs:
           path:   pr/${{ needs.validate-input.outputs.spoke_id }}/${{ needs.validate-input.outputs.pr_number }}
           mode:   rm
 
-  # --- Release: versioned spoke bundle into <rbp>/<vX.Y>/ (parallel w/ hub). 
+  # --- Release: versioned spoke bundle into <rbp>/<vX.Y>/ (parallel w/ hub).
   release-spoke-deploy:
     needs: [validate-input]
     if: needs.validate-input.outputs.mode == 'release'
