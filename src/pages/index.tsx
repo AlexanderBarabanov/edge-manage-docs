@@ -33,7 +33,7 @@ export default function Home(): React.JSX.Element {
             <a
               key={spoke.id}
               className={styles.card}
-              href={`/${spoke.routeBasePath}/`}
+              href={`${siteConfig.baseUrl}${spoke.routeBasePath}/`}
             >
               <Heading as="h2">{spoke.label}</Heading>
               <p className={styles.repo}>{spoke.repo}</p>
