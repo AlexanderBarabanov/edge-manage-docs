@@ -317,6 +317,17 @@ const config: Config = {
               position: 'left' as const,
               target: '_self',
             })),
+            // One docsVersionDropdown per spoke. Each is bound to that
+            // spoke's docs plugin via `docsPluginId`; Docusaurus auto-hides
+            // a dropdown when the active route is not served by its plugin,
+            // so only the current spoke's versions appear at any moment.
+            // Dropdowns also stay hidden for spokes that have no
+            // versioned_docs/, so this is safe to emit unconditionally.
+            ...allSpokes.map((spoke) => ({
+              type: 'docsVersionDropdown' as const,
+              position: 'right' as const,
+              docsPluginId: docsPluginId(spoke),
+            })),
           ],
     },
     prism: { theme: prismThemes.github, darkTheme: prismThemes.dracula },
