@@ -165,13 +165,15 @@ for f in "$ROOT_DIR"/versions.json "$ROOT_DIR"/versioned_docs "$ROOT_DIR"/versio
   [[ -L "$f" ]] && rm -f "$f"
 done
 
-# The id of the first spoke in spokes.yml is the "default" docs plugin
-# (no `<id>_` prefix on its versioning files), matching docusaurus.config.ts
-# which wires `spokes[0]` via presets.classic. Captured from the YAML below
-# so the prefix decision doesn't depend on which spokes happen to ship
-# `docs-versions/` (a counter-based scheme would silently mis-prefix when
-# an earlier spoke has no versions).
-FIRST_SPOKE_ID=""
+# Spoke whose versioning files become the *default* docs plugin's
+# (unprefixed) inputs. This must match docusaurus.config.ts, which wires
+# `spokes[0]` via presets.classic — and `spokes` there is itself filtered
+# by the build mode:
+#   • BUILD_ALL_SPOKES → spokes = allSpokes  → default = allSpokes[0]
+#   • SPOKE=<id>      → spokes = [<id>]     → default = <id>
+# Mirror that here. SPOKE_ID is set from `--only` / SPOKE=<id> handling
+# above; otherwise we fall back to the first id encountered in spokes.yml.
+FIRST_SPOKE_ID="${SPOKE_ID:-}"
 
 link_versioning() {
   # $1 = spoke id, $2 = spoke checkout dir (relative to ROOT_DIR).
