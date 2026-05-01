@@ -206,10 +206,14 @@ const config: Config = {
   // without `--delete` wiping each other's assets:
   //   HUB_ONLY=1                       → / (or $BASE_URL).
   //   BUILD_ALL_SPOKES=1               → $BASE_URL (e.g. /pr/<id>/<N>/).
-  //   SPOKE=<id>                       → /<rbp>/.
+  //   SPOKE=<id>                       → /<rbp>/  (or $BASE_URL for previews).
   //   SPOKE=<id> + SPOKE_VERSION=vX.Y  → /<rbp>/<vX.Y>/.
   baseUrl: SPOKE_MODE
-    ? `/${selectedSpoke!.routeBasePath}/${SPOKE_VERSION ? `${SPOKE_VERSION}/` : ''}`
+    ? SPOKE_VERSION
+      ? `/${selectedSpoke!.routeBasePath}/${SPOKE_VERSION}/`
+      : process.env.BASE_URL
+        ? process.env.BASE_URL.replace(/\/?$/, '/')
+        : `/${selectedSpoke!.routeBasePath}/`
     : process.env.BASE_URL
       ? process.env.BASE_URL.replace(/\/?$/, '/')
       : '/',
@@ -293,14 +297,16 @@ const config: Config = {
             },
           ]
         : [
-            // HUB_ONLY / BUILD_ALL_SPOKES: the bundle owns the parent prefix
-            // (`/` for hub, `/pr/<id>/<N>/` for previews) so spokes inside
-            // it are reachable via Docusaurus' baseUrl-relative `to:`.
+            // Hub bundle. Each spoke is a separate Docusaurus bundle; using
+            // an absolute URL prevents Docusaurus' Link from attempting SPA
+            // navigation within the hub bundle (which has no route for the
+            // spoke and would render 404 until the user refreshes).
             { to: '/', label: 'Home', position: 'left' as const },
             ...allSpokes.map((spoke) => ({
-              to: `/${spoke.routeBasePath}/`,
+              href: `${SITE_ORIGIN}/${spoke.routeBasePath}/`,
               label: spoke.label ?? spoke.id,
               position: 'left' as const,
+              target: '_self',
             })),
           ],
     },
