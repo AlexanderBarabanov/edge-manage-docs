@@ -35,15 +35,18 @@ const fs = require('fs') as typeof import('fs');
 // Each mode emits a single self-contained Docusaurus bundle whose webpack
 // `publicPath` is set by `baseUrl` below — so its assets live entirely under
 // that prefix and never collide with bundles deployed at sibling prefixes:
-//   HUB_ONLY=1                       → hub landing only, baseUrl = /.
-//   BUILD_ALL_SPOKES=1               → hub + every spoke (used by previews),
-//                                       baseUrl from $BASE_URL (e.g. /pr/<id>/<N>/).
-//   SPOKE=<id>                       → that spoke alone, baseUrl = /<rbp>/.
-//   SPOKE=<id> + SPOKE_VERSION=vX.Y  → that spoke alone, baseUrl = /<rbp>/<vX.Y>/.
+//   HUB_ONLY=1         → hub landing only, baseUrl = /.
+//   BUILD_ALL_SPOKES=1 → hub + every spoke (used by previews),
+//                         baseUrl from $BASE_URL (e.g. /pr/<id>/<N>/).
+//   SPOKE=<id>         → that spoke alone, baseUrl = /<rbp>/.
+//
+// Versioning is handled by Docusaurus' standard multi-version docs plugin.
+// Each spoke owns its own `docs-versions/` (versions.json + versioned_docs/
+// + versioned_sidebars/) which clone-spokes.sh symlinks into hub root with
+// the appropriate `<id>_` prefix per plugin instance.
 const HUB_ONLY = process.env.HUB_ONLY === '1';
 const BUILD_ALL_SPOKES = process.env.BUILD_ALL_SPOKES === '1';
 const SPOKE = (process.env.SPOKE ?? '').trim();
-const SPOKE_VERSION = (process.env.SPOKE_VERSION ?? '').trim();
 
 // Site origin (no trailing slash). Used for the canonical site URL and for
 // cross-bundle navbar links (those need an absolute URL so Docusaurus treats
@@ -65,18 +68,13 @@ const selectedSpoke = SPOKE_MODE ? allSpokes.find((s) => s.id === SPOKE) : undef
 if (SPOKE_MODE && !selectedSpoke) {
   throw new Error(`SPOKE='${SPOKE}' not found in spokes.yml.`);
 }
-if (SPOKE_VERSION && !SPOKE_MODE) {
-  throw new Error('SPOKE_VERSION requires SPOKE=<id>.');
-}
 
 // Resolved baseUrl for this build. Reused by navbar links so cross-bundle
 // hrefs include the correct prefix (e.g. /pr/<id>/<N>/<rbp>/ in previews).
 const BASE_URL: string = SPOKE_MODE
-  ? SPOKE_VERSION
-    ? `/${selectedSpoke!.routeBasePath}/${SPOKE_VERSION}/`
-    : process.env.BASE_URL
-      ? process.env.BASE_URL.replace(/\/?$/, '/')
-      : `/${selectedSpoke!.routeBasePath}/`
+  ? process.env.BASE_URL
+    ? process.env.BASE_URL.replace(/\/?$/, '/')
+    : `/${selectedSpoke!.routeBasePath}/`
   : process.env.BASE_URL
     ? process.env.BASE_URL.replace(/\/?$/, '/')
     : '/';
@@ -216,10 +214,9 @@ const config: Config = {
   // entirely (its assets are emitted under it). Each deploy mode picks a
   // disjoint baseUrl so multiple bundles can coexist on the same bucket
   // without `--delete` wiping each other's assets:
-  //   HUB_ONLY=1                       → / (or $BASE_URL).
-  //   BUILD_ALL_SPOKES=1               → $BASE_URL (e.g. /pr/<id>/<N>/).
-  //   SPOKE=<id>                       → /<rbp>/  (or $BASE_URL for previews).
-  //   SPOKE=<id> + SPOKE_VERSION=vX.Y  → /<rbp>/<vX.Y>/.
+  //   HUB_ONLY=1         → / (or $BASE_URL).
+  //   BUILD_ALL_SPOKES=1 → $BASE_URL (e.g. /pr/<id>/<N>/).
+  //   SPOKE=<id>         → /<rbp>/ (or $BASE_URL for previews).
   baseUrl: BASE_URL,
 
   organizationName: 'open-edge-platform',
@@ -291,25 +288,21 @@ const config: Config = {
         ? [
             // Spoke bundles are self-contained sites and only carry a link
             // back to the hub. The hub link is absolute (with `target=_self`)
-            // because the spoke is rooted at /<rbp>/[<v>/] and Docusaurus
-            // would otherwise prefix it with that baseUrl.
+            // because the spoke is rooted at /<rbp>/ and Docusaurus would
+            // otherwise prefix it with that baseUrl.
             {
               href: `${SITE_ORIGIN}/`,
               label: 'Home',
               position: 'left' as const,
               target: '_self',
             },
-            // Versions dropdown. Renders only at runtime if the bucket has
-            // a versions.json with >=2 entries; otherwise the component
-            // returns null. The hub's release workflow is what writes the
-            // manifest, so spoke bundles don't need to know the version
-            // list at build time.
+            // Built-in Docusaurus version dropdown. Reads versions.json /
+            // versioned_docs/ from site root (symlinked into the hub by
+            // clone-spokes.sh from the spoke's docs-versions/). Hides
+            // automatically when there is only the current (next) version.
             {
-              type: 'custom-versionsDropdown',
+              type: 'docsVersionDropdown' as const,
               position: 'right' as const,
-              spokeRouteBasePath: selectedSpoke!.routeBasePath,
-              siteOrigin: SITE_ORIGIN,
-              currentVersion: SPOKE_VERSION,
             },
           ]
         : [

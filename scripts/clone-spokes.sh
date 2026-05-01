@@ -156,6 +156,52 @@ fi
 
 mkdir -p "$ROOT_DIR/spokes"
 
+# Remove any versioning symlinks left over from a previous run; they are
+# (re)created below for each spoke that contributes versioning artifacts.
+# Only matches the well-known names so unrelated files in the hub root are
+# untouched.
+for f in "$ROOT_DIR"/versions.json "$ROOT_DIR"/versioned_docs "$ROOT_DIR"/versioned_sidebars \
+         "$ROOT_DIR"/*_versions.json "$ROOT_DIR"/*_versioned_docs "$ROOT_DIR"/*_versioned_sidebars; do
+  [[ -L "$f" ]] && rm -f "$f"
+done
+
+# Tracks how many spokes we've emitted, so the FIRST emitted spoke becomes
+# the "default" docs plugin (no `<id>_` prefix on its versioning files) —
+# matching docusaurus.config.ts which wires `spokes[0]` via presets.classic.
+EMITTED=0
+
+link_versioning() {
+  # $1 = spoke id, $2 = spoke checkout dir (relative to ROOT_DIR).
+  # Stages the spoke's docs-versions/ artifacts into the hub root using the
+  # names docusaurus' versioning plugin expects:
+  #   default plugin  → versions.json, versioned_docs/, versioned_sidebars/
+  #   non-default     → <id>_versions.json, <id>_versioned_docs/, <id>_versioned_sidebars/
+  #
+  # We *copy* (not symlink) because docusaurus' docs plugin builds webpack
+  # `include` rules from siteDir-relative paths, while webpack's
+  # `resolve.symlinks: true` normalises imported files to their real path —
+  # so a symlinked versioned_docs/ would never match the include rule and
+  # the MDX loader would skip every versioned file. Copying keeps the file's
+  # real path under siteDir.
+  local id="$1" dir="$2"
+  local src="$ROOT_DIR/$dir/docs-versions"
+  if [[ ! -d "$src" ]]; then
+    echo "  no docs-versions/ in $dir; skipping versioning artifacts."
+    return
+  fi
+  local prefix=""
+  if [[ "$EMITTED" -gt 0 ]]; then
+    prefix="${id}_"
+  fi
+  EMITTED=$((EMITTED + 1))
+  rm -rf "$ROOT_DIR/${prefix}versioned_docs" "$ROOT_DIR/${prefix}versioned_sidebars"
+  rm -f  "$ROOT_DIR/${prefix}versions.json"
+  cp     "$src/versions.json"        "$ROOT_DIR/${prefix}versions.json"
+  cp -R  "$src/versioned_docs"       "$ROOT_DIR/${prefix}versioned_docs"
+  cp -R  "$src/versioned_sidebars"   "$ROOT_DIR/${prefix}versioned_sidebars"
+  echo "  versioning → ${prefix}versions.json, ${prefix}versioned_{docs,sidebars}/"
+}
+
 # Parse spokes.yml line by line
 CURRENT_REPO=""
 CURRENT_REF=""
@@ -183,6 +229,7 @@ process_spoke() {
     rm -rf "$dest"
     ln -s "$local_path" "$dest"
     echo "  symlinked → $dest"
+    link_versioning "$id" "spokes/$(basename "$repo")"
     return
   fi
 
@@ -230,6 +277,7 @@ process_spoke() {
   fi
 
   echo "  done → $dest"
+  link_versioning "$id" "spokes/$(basename "$repo")"
 }
 
 while IFS= read -r line; do

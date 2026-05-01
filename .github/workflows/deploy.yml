@@ -11,9 +11,10 @@ name: Deploy
 #   repository_dispatch merge   → hub bundle to bucket root  ‖  spoke bundle
 #                                  at baseUrl=/<rbp>/  →  <rbp>/.   (parallel)
 #   repository_dispatch release → hub bundle to bucket root  ‖  spoke bundle
-#                                  at baseUrl=/<rbp>/<vX.Y>/  →  <rbp>/<vX.Y>/.
-#                                  Then a small redirect-write job depends on
-#                                  the spoke deploy to refresh /<rbp>/index.html.
+#                                  at baseUrl=/<rbp>/  →  <rbp>/.
+#                                  Versioning is part of the spoke content
+#                                  (docs-versions/), so the same <rbp>/
+#                                  prefix carries every published version.
 #   repository_dispatch close   → remove pr/<id>/<N>/.
 
 on:
@@ -70,7 +71,6 @@ jobs:
       branch: ${{ steps.validate.outputs.branch }}
       commit_sha: ${{ steps.validate.outputs.commit_sha }}
       tag: ${{ steps.validate.outputs.tag }}
-      spoke_version: ${{ steps.validate.outputs.spoke_version }}
       mode: ${{ steps.validate.outputs.mode }}
       spoke_id: ${{ steps.validate.outputs.spoke_id }}
       spoke_route_base_path: ${{ steps.validate.outputs.spoke_route_base_path }}
@@ -266,7 +266,11 @@ jobs:
           path:   pr/${{ needs.validate-input.outputs.spoke_id }}/${{ needs.validate-input.outputs.pr_number }}
           mode:   rm
 
-  # --- Release: versioned spoke bundle into <rbp>/<vX.Y>/ (parallel w/ hub).
+  # --- Release: spoke bundle into <rbp>/ at the tagged commit. -------------
+  # Versioning is part of the spoke's content (docs-versions/), so a release
+  # is just "build the spoke at the tagged commit and replace <rbp>/". The
+  # built-in docsVersionDropdown reads the version list from the bundle
+  # itself — no separate redirect or manifest is needed.
   release-spoke-deploy:
     needs: [validate-input]
     if: needs.validate-input.outputs.mode == 'release'
@@ -281,119 +285,18 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-build
-      - name: Build versioned spoke
+      - name: Build spoke at release commit
         env:
           SPOKE: ${{ needs.validate-input.outputs.spoke_id }}
-          SPOKE_VERSION: ${{ needs.validate-input.outputs.spoke_version }}
           SPOKE_OVERRIDES: ${{ needs.validate-input.outputs.source_repo }}:${{ needs.validate-input.outputs.commit_sha }}
           SITE_URL: ${{ secrets.PROD_URL }}
         run: npm run build
-      - name: Sync to <rbp>/<vX.Y>/
+      - name: Sync to <rbp>/
         uses: ./.github/actions/aws-deploy
         with:
           role:   ${{ secrets.PROD_ROLE }}
           bucket: ${{ secrets.PROD_BUCKET }}
-          path:   ${{ needs.validate-input.outputs.spoke_route_base_path }}/${{ needs.validate-input.outputs.spoke_version }}
-
-  release-redirect:
-    # Refresh /<rbp>/index.html → /<rbp>/<vX.Y>/. Runs after the versioned
-    # spoke is in place so the redirect target always exists.
-    needs: [validate-input, release-spoke-deploy]
-    if: needs.validate-input.outputs.mode == 'release'
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
-    environment:
-      name: publish-release
-    steps:
-      - uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
-        with:
-          role-to-assume: ${{ secrets.PROD_ROLE }}
-          role-session-name: Github
-          aws-region: us-east-1
-      - name: Write meta-refresh redirect
-        env:
-          BUCKET: ${{ secrets.PROD_BUCKET }}
-          SPOKE_PATH: ${{ needs.validate-input.outputs.spoke_route_base_path }}
-          SPOKE_VERSION: ${{ needs.validate-input.outputs.spoke_version }}
-        run: |
-          set -euo pipefail
-          cat > /tmp/redirect.html <<HTML
-          <!doctype html>
-          <html lang="en">
-            <head>
-              <meta charset="utf-8" />
-              <title>Redirecting…</title>
-              <meta http-equiv="refresh" content="0; url=${SPOKE_VERSION}/" />
-              <link rel="canonical" href="${SPOKE_VERSION}/" />
-              <script>location.replace(location.pathname.replace(/\/?\$/, '/') + '${SPOKE_VERSION}/' + location.search + location.hash);</script>
-            </head>
-            <body>
-              <p>Redirecting to <a href="${SPOKE_VERSION}/">${SPOKE_VERSION}/</a>…</p>
-            </body>
-          </html>
-          HTML
-          aws s3 cp /tmp/redirect.html "$BUCKET/$SPOKE_PATH/index.html" \
-            --content-type "text/html; charset=utf-8" \
-            --cache-control "public, max-age=300"
-
-  release-versions-manifest:
-    # Regenerate <rbp>/versions.json from whatever versioned prefixes
-    # currently exist on PROD. Runs after the new version is in place so
-    # the manifest always reflects the bucket. Idempotent: lists the
-    # bucket, sorts vMAJOR.MINOR descending, picks the top as 'latest',
-    # writes the file. The runtime VersionsDropdown component reads this
-    # to populate the navbar dropdown without any per-version rebuilds.
-    needs: [validate-input, release-spoke-deploy]
-    if: needs.validate-input.outputs.mode == 'release'
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
-    environment:
-      name: publish-release
-    steps:
-      - uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
-        with:
-          role-to-assume: ${{ secrets.PROD_ROLE }}
-          role-session-name: Github
-          aws-region: us-east-1
-      - name: Write versions.json
-        env:
-          BUCKET: ${{ secrets.PROD_BUCKET }}
-          SPOKE_PATH: ${{ needs.validate-input.outputs.spoke_route_base_path }}
-        run: |
-          set -euo pipefail
-          # List immediate subdirectories of <rbp>/ and keep only those
-          # matching vMAJOR.MINOR. ListObjectsV2 with delimiter '/' returns
-          # CommonPrefixes for each subfolder.
-          versions=$(aws s3api list-objects-v2 \
-              --bucket "${BUCKET#s3://}" \
-              --prefix "$SPOKE_PATH/" \
-              --delimiter '/' \
-              --query 'CommonPrefixes[].Prefix' \
-              --output text \
-            | tr '\t' '\n' \
-            | sed -E "s#^$SPOKE_PATH/##; s#/\$##" \
-            | grep -E '^v[0-9]+\.[0-9]+$' || true)
-          if [[ -z "$versions" ]]; then
-            echo "No versioned prefixes found under $SPOKE_PATH/; skipping manifest." >&2
-            exit 0
-          fi
-          # Sort numeric desc by major.minor (newest first).
-          sorted=$(printf '%s\n' $versions | sort -t. -k1.2,1n -k2,2n -r)
-          latest=$(printf '%s\n' "$sorted" | head -n1)
-          # Build JSON: one entry per version; path is host-absolute so the
-          # dropdown can full-navigate without baseUrl awareness.
-          entries=$(printf '%s\n' "$sorted" \
-            | awk -v rbp="$SPOKE_PATH" '{ printf "%s{\"name\":\"%s\",\"path\":\"/%s/%s/\"}", (NR>1?",":""), $0, rbp, $0 }')
-          cat > /tmp/versions.json <<JSON
-          {"latest":"$latest","versions":[$entries]}
-          JSON
-          aws s3 cp /tmp/versions.json "$BUCKET/$SPOKE_PATH/versions.json" \
-            --content-type "application/json" \
-            --cache-control "public, max-age=60, must-revalidate"
+          path:   ${{ needs.validate-input.outputs.spoke_route_base_path }}
 
   # --- Close: remove the PR preview prefix. ---------------------------------
   close-cleanup:
