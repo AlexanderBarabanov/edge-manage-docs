@@ -191,9 +191,9 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-build
-      - name: Build spoke at preview prefix
+      - name: Build hub + all spokes at preview prefix
         env:
-          SPOKE: ${{ needs.validate-input.outputs.spoke_id }}
+          BUILD_ALL_SPOKES: '1'
           SPOKE_OVERRIDES: ${{ needs.validate-input.outputs.source_repo }}:${{ needs.validate-input.outputs.commit_sha }}
           SITE_URL: ${{ secrets.DEV_URL }}
           BASE_URL: /pr/${{ needs.validate-input.outputs.spoke_id }}/${{ needs.validate-input.outputs.pr_number }}/
@@ -337,6 +337,63 @@ jobs:
           aws s3 cp /tmp/redirect.html "$BUCKET/$SPOKE_PATH/index.html" \
             --content-type "text/html; charset=utf-8" \
             --cache-control "public, max-age=300"
+
+  release-versions-manifest:
+    # Regenerate <rbp>/versions.json from whatever versioned prefixes
+    # currently exist on PROD. Runs after the new version is in place so
+    # the manifest always reflects the bucket. Idempotent: lists the
+    # bucket, sorts vMAJOR.MINOR descending, picks the top as 'latest',
+    # writes the file. The runtime VersionsDropdown component reads this
+    # to populate the navbar dropdown without any per-version rebuilds.
+    needs: [validate-input, release-spoke-deploy]
+    if: needs.validate-input.outputs.mode == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    environment:
+      name: publish-release
+    steps:
+      - uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+        with:
+          role-to-assume: ${{ secrets.PROD_ROLE }}
+          role-session-name: Github
+          aws-region: us-east-1
+      - name: Write versions.json
+        env:
+          BUCKET: ${{ secrets.PROD_BUCKET }}
+          SPOKE_PATH: ${{ needs.validate-input.outputs.spoke_route_base_path }}
+        run: |
+          set -euo pipefail
+          # List immediate subdirectories of <rbp>/ and keep only those
+          # matching vMAJOR.MINOR. ListObjectsV2 with delimiter '/' returns
+          # CommonPrefixes for each subfolder.
+          versions=$(aws s3api list-objects-v2 \
+              --bucket "${BUCKET#s3://}" \
+              --prefix "$SPOKE_PATH/" \
+              --delimiter '/' \
+              --query 'CommonPrefixes[].Prefix' \
+              --output text \
+            | tr '\t' '\n' \
+            | sed -E "s#^$SPOKE_PATH/##; s#/\$##" \
+            | grep -E '^v[0-9]+\.[0-9]+$' || true)
+          if [[ -z "$versions" ]]; then
+            echo "No versioned prefixes found under $SPOKE_PATH/; skipping manifest." >&2
+            exit 0
+          fi
+          # Sort numeric desc by major.minor (newest first).
+          sorted=$(printf '%s\n' $versions | sort -t. -k1.2,1n -k2,2n -r)
+          latest=$(printf '%s\n' "$sorted" | head -n1)
+          # Build JSON: one entry per version; path is host-absolute so the
+          # dropdown can full-navigate without baseUrl awareness.
+          entries=$(printf '%s\n' "$sorted" \
+            | awk -v rbp="$SPOKE_PATH" '{ printf "%s{\"name\":\"%s\",\"path\":\"/%s/%s/\"}", (NR>1?",":""), $0, rbp, $0 }')
+          cat > /tmp/versions.json <<JSON
+          {"latest":"$latest","versions":[$entries]}
+          JSON
+          aws s3 cp /tmp/versions.json "$BUCKET/$SPOKE_PATH/versions.json" \
+            --content-type "application/json" \
+            --cache-control "public, max-age=60, must-revalidate"
 
   # --- Close: remove the PR preview prefix. ---------------------------------
   close-cleanup:
