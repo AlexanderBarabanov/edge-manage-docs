@@ -299,9 +299,18 @@ const config: Config = {
               position: 'left' as const,
               target: '_self',
             },
-            // (Spoke bundles point Home back at the hub root, which is
-            // always at SITE_ORIGIN/ for production. Preview builds don't
-            // use SPOKE_MODE so no baseUrl prefixing is needed here.)
+            // Versions dropdown. Renders only at runtime if the bucket has
+            // a versions.json with >=2 entries; otherwise the component
+            // returns null. The hub's release workflow is what writes the
+            // manifest, so spoke bundles don't need to know the version
+            // list at build time.
+            {
+              type: 'custom-versionsDropdown',
+              position: 'right' as const,
+              spokeRouteBasePath: selectedSpoke!.routeBasePath,
+              siteOrigin: SITE_ORIGIN,
+              currentVersion: SPOKE_VERSION,
+            },
           ]
         : [
             // Hub bundle. Each spoke is a separate Docusaurus bundle; using
