@@ -317,16 +317,16 @@ const config: Config = {
               position: 'left' as const,
               target: '_self',
             })),
-            // One docsVersionDropdown per spoke. Each is bound to that
-            // spoke's docs plugin via `docsPluginId`; Docusaurus auto-hides
-            // a dropdown when the active route is not served by its plugin,
-            // so only the current spoke's versions appear at any moment.
-            // Dropdowns also stay hidden for spokes that have no
-            // versioned_docs/, so this is safe to emit unconditionally.
+            // One version dropdown per spoke, scoped by the spoke's URL
+            // prefix via a small wrapper around `docsVersionDropdown`. The
+            // wrapper hides itself on the hub landing and on routes
+            // belonging to other spokes, so only the active spoke's
+            // selector ever appears.
             ...allSpokes.map((spoke) => ({
-              type: 'docsVersionDropdown' as const,
+              type: 'custom-spokeVersionDropdown' as const,
               position: 'right' as const,
               docsPluginId: docsPluginId(spoke),
+              routePrefix: `${BASE_URL}${spoke.routeBasePath}/`,
             })),
           ],
     },
