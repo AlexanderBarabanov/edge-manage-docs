@@ -321,13 +321,17 @@ const config: Config = {
             // prefix via a small wrapper around `docsVersionDropdown`. The
             // wrapper hides itself on the hub landing and on routes
             // belonging to other spokes, so only the active spoke's
-            // selector ever appears.
-            ...allSpokes.map((spoke) => ({
-              type: 'custom-spokeVersionDropdown' as const,
-              position: 'right' as const,
-              docsPluginId: docsPluginId(spoke),
-              routePrefix: `${BASE_URL}${spoke.routeBasePath}/`,
-            })),
+            // selector ever appears. Skip in HUB_ONLY builds because the
+            // per-spoke docs plugins aren't registered there and the
+            // wrapper's `useVersions(pluginId)` would crash SSG.
+            ...(HUB_ONLY
+              ? []
+              : allSpokes.map((spoke) => ({
+                  type: 'custom-spokeVersionDropdown' as const,
+                  position: 'right' as const,
+                  docsPluginId: docsPluginId(spoke),
+                  routePrefix: `${BASE_URL}${spoke.routeBasePath}/`,
+                }))),
           ],
     },
     prism: { theme: prismThemes.github, darkTheme: prismThemes.dracula },
