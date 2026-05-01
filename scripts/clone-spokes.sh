@@ -165,10 +165,13 @@ for f in "$ROOT_DIR"/versions.json "$ROOT_DIR"/versioned_docs "$ROOT_DIR"/versio
   [[ -L "$f" ]] && rm -f "$f"
 done
 
-# Tracks how many spokes we've emitted, so the FIRST emitted spoke becomes
-# the "default" docs plugin (no `<id>_` prefix on its versioning files) —
-# matching docusaurus.config.ts which wires `spokes[0]` via presets.classic.
-EMITTED=0
+# The id of the first spoke in spokes.yml is the "default" docs plugin
+# (no `<id>_` prefix on its versioning files), matching docusaurus.config.ts
+# which wires `spokes[0]` via presets.classic. Captured from the YAML below
+# so the prefix decision doesn't depend on which spokes happen to ship
+# `docs-versions/` (a counter-based scheme would silently mis-prefix when
+# an earlier spoke has no versions).
+FIRST_SPOKE_ID=""
 
 link_versioning() {
   # $1 = spoke id, $2 = spoke checkout dir (relative to ROOT_DIR).
@@ -190,10 +193,9 @@ link_versioning() {
     return
   fi
   local prefix=""
-  if [[ "$EMITTED" -gt 0 ]]; then
+  if [[ "$id" != "$FIRST_SPOKE_ID" ]]; then
     prefix="${id}_"
   fi
-  EMITTED=$((EMITTED + 1))
   rm -rf "$ROOT_DIR/${prefix}versioned_docs" "$ROOT_DIR/${prefix}versioned_sidebars"
   rm -f  "$ROOT_DIR/${prefix}versions.json"
   cp     "$src/versions.json"        "$ROOT_DIR/${prefix}versions.json"
@@ -292,6 +294,7 @@ while IFS= read -r line; do
     CURRENT_REF="${BASH_REMATCH[1]}"
   elif [[ "$line" =~ ^[[:space:]]*id:[[:space:]]*(.*) ]]; then
     CURRENT_ID="${BASH_REMATCH[1]}"
+    [[ -z "$FIRST_SPOKE_ID" ]] && FIRST_SPOKE_ID="$CURRENT_ID"
   elif [[ "$line" =~ ^[[:space:]]*-[[:space:]]+(.*) && -n "$CURRENT_REPO" ]]; then
     CURRENT_PATHS+=("${BASH_REMATCH[1]}")
   fi
