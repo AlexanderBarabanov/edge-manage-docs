@@ -1,8 +1,8 @@
 # edge-manage-docs
 
-Documentation hub for Intel® Edge AI projects. Renders one Docusaurus site
-that aggregates docs from multiple "spoke" repositories listed in
-[`spokes.yml`](spokes.yml).
+Documentation hub for the OpenVINO ecosystem (prototype). Renders one
+Docusaurus site that aggregates docs from multiple "spoke" repositories
+listed in [`spokes.yml`](spokes.yml).
 
 For day-to-day contribution guidelines (adding spokes, landing pages,
 generated docs) see [`CONTRIBUTING.md`](CONTRIBUTING.md). This file
