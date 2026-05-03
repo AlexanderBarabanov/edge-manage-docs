@@ -3,7 +3,6 @@ spokes:
     ref: master
     id: genai
     routeBasePath: genai
-    label: GenAI
     paths:
       - docs/
       - docs-versions/
@@ -15,7 +14,6 @@ spokes:
     ref: master
     id: openvino
     routeBasePath: openvino
-    label: OpenVINO Toolkit
     paths:
       - docs/
       - docs-versions/

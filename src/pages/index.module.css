@@ -14,6 +14,12 @@
   font-size: 1.15rem;
 }
 
+.prototype {
+  font-size: 0.95rem !important;
+  color: var(--ifm-color-emphasis-600) !important;
+  font-style: italic;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -39,6 +45,12 @@
 
 .card h2 {
   margin: 0 0 0.5rem 0;
+}
+
+.description {
+  margin: 0 0 0.75rem 0;
+  color: var(--ifm-color-emphasis-800);
+  font-size: 0.95rem;
 }
 
 .repo {

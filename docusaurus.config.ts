@@ -4,6 +4,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { themes as prismThemes } from 'prism-react-renderer';
 import { load as yamlLoad } from 'js-yaml';
+import { SPOKE_CATALOG } from './src/hub-catalog';
 
 // This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
 
@@ -12,8 +13,6 @@ type SpokeConfig = {
   ref: string;
   id: string;
   routeBasePath: string;
-  /** Label shown in the navbar. Defaults to `id`. */
-  label?: string;
   paths: string[];
 };
 
@@ -205,7 +204,7 @@ const spokePlugins: PluginConfig[] = [
 ];
 
 const config: Config = {
-  title: 'Edge Docs Hub',
+  title: 'OpenVINO Documentation',
   favicon: 'img/favicon.png',
 
   // Production URL of the site. Override per deployment via $SITE_URL.
@@ -228,7 +227,8 @@ const config: Config = {
     // landing renders the same card grid regardless of build mode.
     spokes: allSpokes.map((s) => ({
       id: s.id,
-      label: s.label ?? s.id,
+      label: SPOKE_CATALOG[s.id]?.label ?? s.id,
+      description: SPOKE_CATALOG[s.id]?.description,
       routeBasePath: s.routeBasePath,
       repo: s.repo,
     })),
@@ -282,7 +282,7 @@ const config: Config = {
   themeConfig: {
     colorMode: { disableSwitch: true, defaultMode: 'light' },
     navbar: {
-      title: 'Edge Docs',
+      title: 'OpenVINO Docs',
       logo: { alt: 'Intel logo', src: 'img/intel-logo.svg' },
       items: SPOKE_MODE
         ? [
@@ -313,7 +313,7 @@ const config: Config = {
             { to: '/', label: 'Home', position: 'left' as const },
             ...allSpokes.map((spoke) => ({
               href: `${SITE_ORIGIN}${BASE_URL}${spoke.routeBasePath}/`,
-              label: spoke.label ?? spoke.id,
+              label: SPOKE_CATALOG[spoke.id]?.label ?? spoke.id,
               position: 'left' as const,
               target: '_self',
             })),

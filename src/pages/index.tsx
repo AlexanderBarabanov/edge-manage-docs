@@ -6,6 +6,7 @@ import styles from './index.module.css';
 type SpokeSummary = {
   id: string;
   label: string;
+  description?: string;
   routeBasePath: string;
   repo: string;
 };
@@ -16,12 +17,12 @@ export default function Home(): React.JSX.Element {
   return (
     <Layout
       title="Home"
-      description={`${siteConfig.title} — documentation hub for Edge platform projects.`}
+      description={`${siteConfig.title} — documentation for the OpenVINO ecosystem.`}
     >
       <main className={styles.main}>
         <header className={styles.hero}>
           <Heading as="h1">{siteConfig.title}</Heading>
-          <p>Documentation hub for Edge platform projects.</p>
+          <p>Documentation for the OpenVINO ecosystem.</p>
         </header>
         <section className={styles.grid}>
           {spokes.map((spoke) => (
@@ -36,6 +37,9 @@ export default function Home(): React.JSX.Element {
               href={`${siteConfig.baseUrl}${spoke.routeBasePath}/`}
             >
               <Heading as="h2">{spoke.label}</Heading>
+              {spoke.description && (
+                <p className={styles.description}>{spoke.description}</p>
+              )}
               <p className={styles.repo}>{spoke.repo}</p>
             </a>
           ))}
