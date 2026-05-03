@@ -106,10 +106,13 @@ jobs:
   # every spoke's <rbp> and the pr/ prefix so it never touches their bytes.
   hub-deploy:
     if: |
-      github.event_name == 'push'
-      || (github.event_name == 'workflow_dispatch' && inputs.source_repo == '')
-      || needs.validate-input.outputs.mode == 'merge'
-      || needs.validate-input.outputs.mode == 'release'
+      !failure() && !cancelled()
+      && (
+        github.event_name == 'push'
+        || (github.event_name == 'workflow_dispatch' && inputs.source_repo == '')
+        || needs.validate-input.outputs.mode == 'merge'
+        || needs.validate-input.outputs.mode == 'release'
+      )
     needs: [validate-input]
     runs-on: ubuntu-latest
     permissions:
