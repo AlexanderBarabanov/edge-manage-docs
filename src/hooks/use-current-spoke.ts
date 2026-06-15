@@ -10,8 +10,9 @@ export const useCurrentSpoke = () => {
   // SPOKE bundle: one spoke, baked at build time. The URL may carry an
   // arbitrary deploy prefix (/pr/hub/44/<rbp>/), so read it from config
   // instead of parsing the path.
-  const currentSpokeId = siteConfig.customFields?.currentSpokeId;
-
+  const currentSpokeId = siteConfig.customFields?.currentSpokeId as
+    | string
+    | undefined;
   if (currentSpokeId) {
     return spokes.find((s) => s.id === currentSpokeId);
   }
