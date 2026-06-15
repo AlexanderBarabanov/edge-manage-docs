@@ -82,6 +82,17 @@ const BASE_URL: string = SPOKE_MODE
     ? process.env.BASE_URL.replace(/\/?$/, "/")
     : "/";
 
+// The URL prefix every sibling bundle is deployed under. In hub/all builds
+// that is just baseUrl. In a SPOKE build baseUrl already ends with the
+// spoke's own routeBasePath (e.g. /pr/hub/44/genai/), so strip that trailing
+// segment to recover the shared root (/pr/hub/44/) — or "/" in production.
+const SPOKES_ROOT = SPOKE_MODE
+  ? BASE_URL.replace(
+      new RegExp(`${selectedSpoke!.routeBasePath}/$`),
+      "",
+    )
+  : BASE_URL;
+
 const spokes: SpokeConfig[] = HUB_ONLY
   ? []
   : BUILD_ALL_SPOKES
@@ -287,8 +298,15 @@ const config: Config = {
       description: SPOKE_CATALOG[s.id]?.description,
       routeBasePath: s.routeBasePath,
       repo: s.repo,
-      href: `${SITE_ORIGIN}${SPOKE_MODE ? "/" : BASE_URL}${s.routeBasePath}/`,
+      href: `${SITE_ORIGIN}${SPOKES_ROOT}${s.routeBasePath}/`,
     })),
+    // Absolute URL of the hub landing page (OpenVINO's landing IS the hub root).
+    // Used by the ProductGridDropdown so the OpenVINO card always links to the
+    // hub, even when the current bundle is a spoke at a prefixed baseUrl.
+    hubUrl: `${SITE_ORIGIN}${SPOKES_ROOT}`,
+    // The spoke this bundle was built for (SPOKE mode only). Baked at build
+    // time so useCurrentSpoke can trust it instead of parsing a prefixed URL.
+    currentSpokeId: SPOKE_MODE ? selectedSpoke!.id : undefined,
   },
 
   onBrokenLinks: "warn",
