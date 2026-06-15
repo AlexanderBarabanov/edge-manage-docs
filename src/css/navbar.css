@@ -41,10 +41,15 @@
   font-family: var(--genai-font-family);
   color: var(--genai-color-text-white);
   width: 238px;
-  background: #122f84 url('../../static/img/magnifying-glass.svg') no-repeat 0.75rem center / 1rem
+  background: var(--genai-color-white) url('../../static/img/magnifying-glass.svg') no-repeat 0.75rem center / 1rem
     1rem;
 
   &::placeholder {
     color: var(--genai-color-text-white);
   }
+}
+
+
+.navbar__toggle {
+  color: var(--genai-color-white);
 }
