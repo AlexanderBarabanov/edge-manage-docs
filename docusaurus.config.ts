@@ -307,6 +307,10 @@ const config: Config = {
     // The spoke this bundle was built for (SPOKE mode only). Baked at build
     // time so useCurrentSpoke can trust it instead of parsing a prefixed URL.
     currentSpokeId: SPOKE_MODE ? selectedSpoke!.id : undefined,
+    // IDs of spokes whose doc routes exist in this bundle. Empty in HUB_ONLY;
+    // one entry in SPOKE mode; all entries in BUILD_ALL_SPOKES. Used by
+    // DocumentationLink to decide between client-side and full-page navigation.
+    bundledSpokeIds: spokes.map((s) => s.id),
   },
 
   onBrokenLinks: "warn",
