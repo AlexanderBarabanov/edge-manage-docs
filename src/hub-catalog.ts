@@ -14,7 +14,7 @@ export const SPOKE_CATALOG: Record<string, SpokeCatalogEntry> = {
       "Open-source toolkit for deploying performant AI solutions in the cloud, on-prem, and on the edge.",
   },
   genai: {
-    label: "OpenVINO GenAI",
+    label: "GenAI",
     description: "Run and deploy generative AI models.",
   },
   physicalai: {
@@ -36,13 +36,13 @@ export type ProductCard = {
 };
 
 export const OpenVINOHub: ProductCard = {
-  title: "OpenVINO Runtime",
+  title: "Runtime",
   description: "Open-source toolkit for deploying performant AI solutions",
   spokeId: "openvino",
 };
 
 export const GenAIHub: ProductCard = {
-  title: "OpenVINO GenAI",
+  title: "GenAI",
   description: "Optimizing pipelines for running generative AI models",
   spokeId: "genai",
 };
@@ -53,4 +53,8 @@ export const PhysicalAIHub: ProductCard = {
   spokeId: "physicalai",
 };
 
-export const PRODUCT_CARDS: readonly ProductCard[] = [OpenVINOHub, GenAIHub, PhysicalAIHub];
+export const PRODUCT_CARDS: readonly ProductCard[] = [
+  OpenVINOHub,
+  GenAIHub,
+  PhysicalAIHub,
+];

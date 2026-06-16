@@ -87,10 +87,7 @@ const BASE_URL: string = SPOKE_MODE
 // spoke's own routeBasePath (e.g. /pr/hub/44/genai/), so strip that trailing
 // segment to recover the shared root (/pr/hub/44/) — or "/" in production.
 const SPOKES_ROOT = SPOKE_MODE
-  ? BASE_URL.replace(
-      new RegExp(`${selectedSpoke!.routeBasePath}/$`),
-      "",
-    )
+  ? BASE_URL.replace(new RegExp(`${selectedSpoke!.routeBasePath}/$`), "")
   : BASE_URL;
 
 const spokes: SpokeConfig[] = HUB_ONLY
@@ -253,7 +250,7 @@ const spokePlugins: PluginConfig[] = [
 // OpenVINO product card) is flagged. The links resolve correctly at runtime
 // via the redirect, and `onBrokenLinks: "warn"` lets the build pass — these
 // specific warnings are benign.
-const openvinoSpoke = spokes.find((s) => s.id === "openvino");
+const openvinoSpoke = spokes.find(({ id }) => id === "openvino");
 if (openvinoSpoke) {
   spokePlugins.push([
     "@docusaurus/plugin-client-redirects",
@@ -376,7 +373,10 @@ const config: Config = {
     colorMode: { disableSwitch: true, defaultMode: "light" },
     navbar: {
       items: [
-
+        {
+          type: "custom-openVINOLogo" as const,
+          position: "left" as const,
+        },
         {
           type: "custom-productGrid" as const,
           label: "OpenVINO Runtime",
