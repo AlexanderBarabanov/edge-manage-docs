@@ -358,6 +358,15 @@ const config: Config = {
               docsDir: spokes.map((s) =>
                 path.join(spokeCheckoutDir(s), "docs"),
               ),
+              // Scope search per spoke site so /genai/ search doesn't return
+              // /openvino/ or /physicalai/ hits. Irrelevant in SPOKE mode (a
+              // single site rooted at '/').
+              ...(SPOKE_MODE
+                ? {}
+                : {
+                    searchContextByPaths: spokes.map((s) => s.routeBasePath),
+                    useAllContextsWithNoSearchContext: true,
+                  }),
             },
           ],
         ] as Config["themes"] & object[])),
