@@ -32,10 +32,9 @@ function Desktop({ position, className }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
 
-  const label =
-    spoke === undefined || spoke.id === "openvino"
-      ? "OpenVINO Runtime"
-      : spoke.label;
+  const rawLabel =
+    spoke === undefined || spoke.id === "openvino" ? "Runtime" : spoke.label;
+  const label = rawLabel.replace(`OpenVINO `, "");
 
   useEffect(() => {
     const onPointerDown = (e: Event) => {

@@ -80,12 +80,10 @@ export default function DocumentationLinkNavbarItem(props: Props) {
     );
   }
 
-  const to = getTo(targetSpoke);
-
   return (
     <DefaultNavbarItem
       {...props}
-      to={to}
+      to={getTo(targetSpoke)}
       className={clsx(props.className, {
         "navbar__link--active": docsActive,
       })}
