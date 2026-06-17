@@ -395,7 +395,15 @@ const config: Config = {
               },
             ]
           : HUB_ONLY
-            ? []
+            ? [
+                // Hub-only bundles drop the easyops search theme (no local
+                // docs index). Forward searches to the OpenVINO Runtime
+                // spoke's own search page instead.
+                {
+                  type: "custom-runtimeSearch" as const,
+                  position: "right" as const,
+                },
+              ]
             : allSpokes.map((spoke) => ({
                 type: "custom-spokeVersionDropdown" as const,
                 position: "right" as const,
