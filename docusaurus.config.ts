@@ -324,7 +324,20 @@ const config: Config = {
     [
       "classic",
       {
-        docs: HUB_ONLY ? false : docsPluginOptions(firstSpoke),
+        // In HUB_ONLY mode there are no spoke checkouts, but we still need
+        // a `docusaurus-plugin-content-docs` instance registered under the
+        // "default" plugin id — the search theme's <SearchBar> calls
+        // `useDocsData()` which hard-requires that registration. We satisfy
+        // it with a stub empty docs directory; the search index for this
+        // instance will simply be empty (the hub landing has no docs of its
+        // own). In all other modes the first spoke's real docs are used.
+        docs: HUB_ONLY
+          ? {
+              path: "docs-hub",
+              routeBasePath: "hub-docs",
+              sidebarPath: false,
+            }
+          : docsPluginOptions(firstSpoke),
         blog: false,
         // The hub landing under src/pages/ is only relevant for builds that
         // include the hub itself (HUB_ONLY, BUILD_ALL_SPOKES). In SPOKE mode
@@ -338,35 +351,34 @@ const config: Config = {
   plugins: spokePlugins,
 
   themes: [
-    // The search theme's <SearchBar> hooks into the docs plugin's global
-    // data. In hub-only builds there's no docs plugin, so we drop the
-    // search theme entirely (the hub landing has no content to search).
-
-    ...(HUB_ONLY
-      ? []
-      : ([
-          [
-            require.resolve("@easyops-cn/docusaurus-search-local"),
-            {
-              hashed: true,
-              highlightSearchTermsOnTargetPage: true,
-              searchBarShortcutHint: false,
-              docsRouteBasePath: spokes.map((s) => docsRouteBasePath(s)),
-              docsDir: spokes.map((s) =>
-                path.join(spokeCheckoutDir(s), "docs"),
-              ),
-              // Scope search per spoke site so /genai/ search doesn't return
-              // /openvino/ or /physicalai/ hits. Irrelevant in SPOKE mode (a
-              // single site rooted at '/').
-              ...(SPOKE_MODE
-                ? {}
-                : {
-                    searchContextByPaths: spokes.map((s) => s.routeBasePath),
-                    useAllContextsWithNoSearchContext: true,
-                  }),
-            },
-          ],
-        ] as Config["themes"] & object[])),
+    // The search theme's <SearchBar> calls useDocsData() which requires a
+    // docs plugin registered under pluginId="default". In HUB_ONLY mode the
+    // classic preset registers a stub docs plugin at `docs-hub/` (empty, so
+    // the search index is empty on the hub landing). In all other modes real
+    // spoke docs are indexed as usual.
+    [
+      require.resolve("@easyops-cn/docusaurus-search-local"),
+      {
+        hashed: true,
+        highlightSearchTermsOnTargetPage: true,
+        searchBarShortcutHint: false,
+        docsRouteBasePath: HUB_ONLY
+          ? ["hub-docs"]
+          : spokes.map(docsRouteBasePath),
+        docsDir: HUB_ONLY
+          ? ["docs-hub"]
+          : spokes.map((spoke) => path.join(spokeCheckoutDir(spoke), "docs")),
+        // Scope search per spoke site so /genai/ search doesn't return
+        // /openvino/ or /physicalai/ hits. Irrelevant in SPOKE mode (a
+        // single site rooted at '/') or HUB_ONLY (no spoke docs).
+        ...(SPOKE_MODE || HUB_ONLY
+          ? {}
+          : {
+              searchContextByPaths: spokes.map((s) => s.routeBasePath),
+              useAllContextsWithNoSearchContext: true,
+            }),
+      },
+    ],
   ],
 
   themeConfig: {
