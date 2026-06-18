@@ -250,6 +250,16 @@ const spokePlugins: PluginConfig[] = [
 const openvinoSpoke = spokes.find(({ id }) => id === "openvino");
 const openvinoHasLanding =
   openvinoSpoke !== undefined && spokeHasLandingPage(openvinoSpoke);
+const openvinoCatalogSpoke = allSpokes.find(({ id }) => id === "openvino");
+
+// Client-side root redirect used by src/pages/index.tsx in HUB_ONLY mode.
+// In HUB_ONLY there are no docs/spokes mounted in this bundle, so we point to
+// the OpenVINO sibling bundle path under the shared prefix.
+const rootLandingRedirectTo = HUB_ONLY
+  ? openvinoCatalogSpoke
+    ? `${SPOKES_ROOT}${openvinoCatalogSpoke.routeBasePath}/`
+    : undefined
+  : undefined;
 
 // In BUILD_ALL_SPOKES, redirect hub root to the OpenVINO spoke landing.
 // Disabling hub pages (below) removes the conflicting root route so
@@ -324,8 +334,10 @@ const config: Config = {
       repo: s.repo,
       href: `${SITE_ORIGIN}${SPOKES_ROOT}${s.routeBasePath}/`,
     })),
+    // Optional redirect target consumed by src/pages/index.tsx.
+    rootLandingRedirectTo,
     // Absolute URL of the hub entry page (redirect target lives at
-    // /spoke/openvino/_landing in non-SPOKE builds).
+    // /openvino/ (or /openvino/docs/ when no landing) in non-SPOKE builds.
     // Used by the ProductGridDropdown for the OpenVINO card when the current
     // bundle is a spoke at a prefixed baseUrl.
     hubUrl: `${SITE_ORIGIN}${SPOKES_ROOT}`,
