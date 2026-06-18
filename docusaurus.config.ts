@@ -36,7 +36,7 @@ const fs = require("fs") as typeof import("fs");
 // Each mode emits a single self-contained Docusaurus bundle whose webpack
 // `publicPath` is set by `baseUrl` below — so its assets live entirely under
 // that prefix and never collide with bundles deployed at sibling prefixes:
-//   HUB_ONLY=1         → hub landing only, baseUrl = /.
+//   HUB_ONLY=1         → hub landing only (src/pages/), baseUrl = /.
 //   BUILD_ALL_SPOKES=1 → hub + every spoke (used by previews),
 //                         baseUrl from $BASE_URL (e.g. /pr/<id>/<N>/).
 //   SPOKE=<id>         → that spoke alone, baseUrl = /<rbp>/.
@@ -173,17 +173,18 @@ function docsPlugin(spoke: SpokeConfig): PluginConfig {
   ];
 }
 
+function spokeHasLandingPage(spoke: SpokeConfig): boolean {
+  const landingDir = path.join(spokeCheckoutDir(spoke), "docs", "_landing");
+  return fs.existsSync(path.join(REPO_ROOT, landingDir));
+}
+
 function landingPagePlugin(spoke: SpokeConfig): PluginConfig | null {
   // Optional landing page lives at `docs/_landing/` inside the spoke — the
   // leading underscore tells the docs plugin to ignore the folder, so a single
   // `docs/` tree holds both docs content and the landing page source.
+  if (!spokeHasLandingPage(spoke)) return null;
+
   const landingDir = path.join(spokeCheckoutDir(spoke), "docs", "_landing");
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    require("fs").statSync(path.join(REPO_ROOT, landingDir));
-  } catch {
-    return null;
-  }
   return [
     "@docusaurus/plugin-content-pages",
     {
@@ -233,32 +234,68 @@ const spokePlugins: PluginConfig[] = [
   ),
 ];
 
-// OpenVINO is the only spoke without a landing page of its own: its product
-// landing IS the hub root ("/"). Now that its docs live on the shared
-// `<rbp>/docs/` segment like every other spoke, the bare `/openvino/` path
-// has nothing mounted on it and would 404, so redirect it to the docs root.
-// `from`/`to` are baseUrl-relative — the plugin writes the redirect file under
-// outDir/<from> and prepends baseUrl to <to> — so the same pair works in every
-// mode (SPOKE=openvino roots the bundle at /openvino/, hence from "/"). Only
-// emitted when the OpenVINO spoke is in this build; the plugin runs on
-// `build`, not on `docusaurus start`.
-//
-// Expected side effect: in SPOKE=openvino mode the build reports broken-link
-// warnings for `/openvino/`. That path is now redirect-only, but Docusaurus'
-// link checker runs before this plugin's postBuild and doesn't know about the
-// redirect, so anything pointing at baseUrl (the navbar brand/logo, the
-// OpenVINO product card) is flagged. The links resolve correctly at runtime
-// via the redirect, and `onBrokenLinks: "warn"` lets the build pass — these
-// specific warnings are benign.
+// Root (`/`) redirect behaviour:
+//   BUILD_ALL_SPOKES + OpenVINO has _landing  → / redirects to /<rbp>/ (the
+//     route where plugin-content-pages serves docs/_landing content).
+//   BUILD_ALL_SPOKES + OpenVINO has no landing → /openvino/ redirects to
+//     /openvino/docs/ so the bare spoke path never 404s.
+//   SPOKE_MODE + spoke has _landing           → landing is already mounted at
+//     / by landingPagePlugin; no redirect needed.
+//   SPOKE_MODE + spoke has no _landing        → / redirects to /docs/ so root
+//     never 404s.
+//   HUB_ONLY                                  → no docs/spokes built; src/pages
+//     serves the hub; no redirect needed.
+// `from`/`to` values are baseUrl-relative — the plugin writes the redirect file
+// under outDir/<from> and prepends baseUrl to <to>.
 const openvinoSpoke = spokes.find(({ id }) => id === "openvino");
-if (openvinoSpoke) {
+const openvinoHasLanding =
+  openvinoSpoke !== undefined && spokeHasLandingPage(openvinoSpoke);
+const openvinoCatalogSpoke = allSpokes.find(({ id }) => id === "openvino");
+
+// Client-side root redirect used by src/pages/index.tsx in HUB_ONLY mode.
+// In HUB_ONLY there are no docs/spokes mounted in this bundle, so we point to
+// the OpenVINO sibling bundle path under the shared prefix.
+const rootLandingRedirectTo = HUB_ONLY
+  ? openvinoCatalogSpoke
+    ? `${SPOKES_ROOT}${openvinoCatalogSpoke.routeBasePath}/`
+    : undefined
+  : undefined;
+
+// In BUILD_ALL_SPOKES, redirect hub root to the OpenVINO spoke landing.
+// Disabling hub pages (below) removes the conflicting root route so
+// plugin-client-redirects can write build/index.html.
+if (BUILD_ALL_SPOKES && openvinoSpoke && openvinoHasLanding) {
+  spokePlugins.push([
+    "@docusaurus/plugin-client-redirects",
+    {
+      redirects: [{ from: "/", to: `/${openvinoSpoke.routeBasePath}/` }],
+    },
+  ]);
+}
+
+// In SPOKE mode, if the selected spoke has a _landing page it is already
+// mounted at "/" by landingPagePlugin — no redirect needed. If it has no
+// landing, redirect root to docs so "/" never 404s. This is generic across
+// all spokes, not only OpenVINO.
+if (SPOKE_MODE && selectedSpoke && !spokeHasLandingPage(selectedSpoke)) {
+  spokePlugins.push([
+    "@docusaurus/plugin-client-redirects",
+    {
+      redirects: [{ from: "/", to: "/docs/" }],
+    },
+  ]);
+}
+
+// In BUILD_ALL_SPOKES, OpenVINO has no dedicated landing page so its bare
+// /openvino/ path would 404 — redirect it to the docs root.
+if (!SPOKE_MODE && openvinoSpoke && !openvinoHasLanding) {
   spokePlugins.push([
     "@docusaurus/plugin-client-redirects",
     {
       redirects: [
         {
-          from: SPOKE_MODE ? "/" : `/${openvinoSpoke.routeBasePath}/`,
-          to: SPOKE_MODE ? "/docs/" : `/${openvinoSpoke.routeBasePath}/docs/`,
+          from: `/${openvinoSpoke.routeBasePath}/`,
+          to: `/${openvinoSpoke.routeBasePath}/docs/`,
         },
       ],
     },
@@ -284,9 +321,9 @@ const config: Config = {
   projectName: "edge-manage-docs",
 
   customFields: {
-    // Exposed to client-side code (e.g. the hub landing page) via
-    // useDocusaurusContext(). Always advertises every spoke so the hub
-    // landing renders the same card grid regardless of build mode.
+    // Exposed to client-side code via useDocusaurusContext(). Always
+    // advertises every spoke so shared UI can render the same card grid
+    // regardless of build mode.
     // `href` is a fully-qualified absolute URL so cross-bundle links work
     // identically from hub and spoke builds (and across preview prefixes).
     spokes: allSpokes.map((s) => ({
@@ -297,9 +334,12 @@ const config: Config = {
       repo: s.repo,
       href: `${SITE_ORIGIN}${SPOKES_ROOT}${s.routeBasePath}/`,
     })),
-    // Absolute URL of the hub landing page (OpenVINO's landing IS the hub root).
-    // Used by the ProductGridDropdown so the OpenVINO card always links to the
-    // hub, even when the current bundle is a spoke at a prefixed baseUrl.
+    // Optional redirect target consumed by src/pages/index.tsx.
+    rootLandingRedirectTo,
+    // Absolute URL of the hub entry page (redirect target lives at
+    // /openvino/ (or /openvino/docs/ when no landing) in non-SPOKE builds.
+    // Used by the ProductGridDropdown for the OpenVINO card when the current
+    // bundle is a spoke at a prefixed baseUrl.
     hubUrl: `${SITE_ORIGIN}${SPOKES_ROOT}`,
     // The spoke this bundle was built for (SPOKE mode only). Baked at build
     // time so useCurrentSpoke can trust it instead of parsing a prefixed URL.
@@ -326,10 +366,14 @@ const config: Config = {
       {
         docs: HUB_ONLY ? false : docsPluginOptions(firstSpoke),
         blog: false,
-        // The hub landing under src/pages/ is only relevant for builds that
-        // include the hub itself (HUB_ONLY, BUILD_ALL_SPOKES). In SPOKE mode
-        // the bundle is the spoke alone and must not emit a hub landing.
-        pages: SPOKE_MODE ? false : undefined,
+        // Hub pages (src/pages/) serve the hub landing in HUB_ONLY builds.
+        // In SPOKE mode we never emit them. In BUILD_ALL_SPOKES when OpenVINO
+        // has its own landing page we also disable them so the root route is
+        // free for plugin-client-redirects to write build/index.html.
+        pages:
+          SPOKE_MODE || (BUILD_ALL_SPOKES && openvinoHasLanding)
+            ? false
+            : undefined,
         theme: { customCss: "./src/css/custom.css" },
       } satisfies Preset.Options,
     ],
@@ -340,7 +384,7 @@ const config: Config = {
   themes: [
     // The search theme's <SearchBar> hooks into the docs plugin's global
     // data. In hub-only builds there's no docs plugin, so we drop the
-    // search theme entirely (the hub landing has no content to search).
+    // search theme entirely.
 
     ...(HUB_ONLY
       ? []
