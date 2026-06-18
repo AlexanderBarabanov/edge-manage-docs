@@ -89,11 +89,8 @@ function Desktop({ position, className }: Props) {
 }
 
 function DesktopCard({ card }: { card: (typeof PRODUCT_CARDS)[number] }) {
-  const { siteConfig } = useDocusaurusContext();
-  const hubUrl = siteConfig.customFields?.hubUrl as string;
   const spokeHref = useSpokeHref(card.spokeId);
-  // OpenVINO's landing is the hub root; every other card uses its spoke landing.
-  const href = card.spokeId === "openvino" ? hubUrl : spokeHref;
+  const href = spokeHref;
 
   if (href) {
     return (
