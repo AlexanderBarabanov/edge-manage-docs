@@ -120,7 +120,7 @@ npm run serve       # serve build/ at localhost:3000
 npm start           # hot-reload dev server (BUILD_ALL_SPOKES=1 required)
 ```
 
-Exactly one build mode env var must be set (`BUILD_ALL_SPOKES`, `SPOKE`, or `HUB_ONLY`) or the build aborts.
+Exactly one build mode env var must be set (`BUILD_ALL_SPOKES`, `SPOKE`, or `ROOT_REDIRECT`) or the build aborts.
 
 Requirements: Node 22, `git`, `git-lfs` (if any spoke uses LFS).
 
@@ -130,7 +130,7 @@ Spoke CI dispatches `deploy-preview` to the hub with `{ repo, branch, pr_number,
 
 **Preview mode** (branch ≠ main/master):
 1. Hub validates sender and payload.
-2. Builds hub (`HUB_ONLY`) + the triggering spoke (`SPOKE=<id>`), each with `BASE_URL=/pr/<spoke>/<PR#>/[<rbp>/]`.
+2. Builds the root redirect (`ROOT_REDIRECT`) + the triggering spoke (`SPOKE=<id>`), each with `BASE_URL=/pr/<spoke>/<PR#>/[<rbp>/]`.
 3. Deploys both to `pr/<spoke>/<PR#>/`.
 4. Posts a preview link as a PR comment; updates it on each push.
 

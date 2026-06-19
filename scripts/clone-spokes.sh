@@ -79,10 +79,10 @@ if [[ -n "$LEGACY_OVERRIDE_REPO" && -n "$LEGACY_OVERRIDE_REF" ]]; then
   add_override "${LEGACY_OVERRIDE_REPO}:${LEGACY_OVERRIDE_REF}"
 fi
 
-# HUB_ONLY=1 — skip cloning entirely. Used by deploy-hub.yml so the
-# subsequent docusaurus build emits just the hub landing.
-if [[ "${HUB_ONLY:-}" == "1" ]]; then
-  echo "HUB_ONLY=1: skipping spoke cloning."
+# ROOT_REDIRECT=1 — skip cloning entirely. Used by the root deploy so the
+# subsequent docusaurus build emits just the site-root redirect.
+if [[ "${ROOT_REDIRECT:-}" == "1" ]]; then
+  echo "ROOT_REDIRECT=1: skipping spoke cloning."
   exit 0
 fi
 
@@ -98,7 +98,7 @@ fi
 # Build mode (mirrors docusaurus.config.ts validation):
 #   BUILD_ALL_SPOKES=1 → clone every spoke
 #   SPOKE=<id>         → clone just that one
-# Exactly one must be set when HUB_ONLY is unset.
+# Exactly one must be set when ROOT_REDIRECT is unset.
 BUILD_ALL_SPOKES_FLAG="${BUILD_ALL_SPOKES:-}"
 SPOKE_ID="${SPOKE:-}"
 if [[ "$BUILD_ALL_SPOKES_FLAG" == "1" && -n "$SPOKE_ID" ]]; then
@@ -106,7 +106,7 @@ if [[ "$BUILD_ALL_SPOKES_FLAG" == "1" && -n "$SPOKE_ID" ]]; then
   exit 1
 fi
 if [[ "$BUILD_ALL_SPOKES_FLAG" != "1" && -z "$SPOKE_ID" ]]; then
-  echo "Error: set BUILD_ALL_SPOKES=1 or SPOKE=<id> (HUB_ONLY=1 already handled above)." >&2
+  echo "Error: set BUILD_ALL_SPOKES=1 or SPOKE=<id> (ROOT_REDIRECT=1 already handled above)." >&2
   exit 1
 fi
 if [[ -n "$SPOKE_ID" ]]; then

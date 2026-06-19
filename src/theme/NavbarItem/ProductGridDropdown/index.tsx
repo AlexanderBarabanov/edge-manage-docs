@@ -1,4 +1,3 @@
-import useDocusaurusContext from "@docusaurus/useDocusaurusContext";
 import { useCurrentSpoke } from "@site/src/hooks/use-current-spoke";
 import { useNavState } from "@site/src/hooks/use-nav-state";
 import { useSpokeHref } from "@site/src/hooks/use-spoke-href";
@@ -89,11 +88,7 @@ function Desktop({ position, className }: Props) {
 }
 
 function DesktopCard({ card }: { card: (typeof PRODUCT_CARDS)[number] }) {
-  const { siteConfig } = useDocusaurusContext();
-  const hubUrl = siteConfig.customFields?.hubUrl as string;
-  const spokeHref = useSpokeHref(card.spokeId);
-  // OpenVINO's landing is the hub root; every other card uses its spoke landing.
-  const href = card.spokeId === "openvino" ? hubUrl : spokeHref;
+  const href = useSpokeHref(card.spokeId);
 
   if (href) {
     return (
@@ -129,11 +124,7 @@ function Mobile({ label, className }: Props) {
 }
 
 function MobileCard({ card }: { card: (typeof PRODUCT_CARDS)[number] }) {
-  const { siteConfig } = useDocusaurusContext();
-  const hubUrl = siteConfig.customFields?.hubUrl as string;
-  const spokeHref = useSpokeHref(card.spokeId);
-  // OpenVINO's landing is the hub root; every other card uses its spoke landing.
-  const href = card.spokeId === "openvino" ? hubUrl : spokeHref;
+  const href = useSpokeHref(card.spokeId);
 
   if (href) {
     return (

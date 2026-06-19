@@ -18,16 +18,22 @@ type SpokeConfig = {
 
 type SpokesYml = {
   spokes: SpokeConfig[];
+  rootRedirectSpoke: string;
 };
 
 const REPO_ROOT = __dirname;
 const SPOKES_DIR = "spokes";
 
-const allSpokes: SpokeConfig[] = (
-  yamlLoad(
-    readFileSync(path.join(REPO_ROOT, "spokes.yml"), "utf8"),
-  ) as SpokesYml
-).spokes;
+const spokesYml = yamlLoad(
+  readFileSync(path.join(REPO_ROOT, "spokes.yml"), "utf8"),
+) as SpokesYml;
+
+const allSpokes: SpokeConfig[] = spokesYml.spokes;
+
+// Id of the spoke the site root ("/") redirects to. Declared once at the top
+// level of spokes.yml so there is a single source of truth for "which product
+// is the landing page". Validated below once the build mode is known.
+const ROOT_REDIRECT_SPOKE_ID = (spokesYml.rootRedirectSpoke ?? "").trim();
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const fs = require("fs") as typeof import("fs");
@@ -36,8 +42,10 @@ const fs = require("fs") as typeof import("fs");
 // Each mode emits a single self-contained Docusaurus bundle whose webpack
 // `publicPath` is set by `baseUrl` below — so its assets live entirely under
 // that prefix and never collide with bundles deployed at sibling prefixes:
-//   HUB_ONLY=1         → hub landing only, baseUrl = /.
-//   BUILD_ALL_SPOKES=1 → hub + every spoke (used by previews),
+//   ROOT_REDIRECT=1    → site root only: a single index.html that redirects
+//                        to the spoke named by `rootRedirectSpoke` in
+//                        spokes.yml. baseUrl = / (or $BASE_URL).
+//   BUILD_ALL_SPOKES=1 → root redirect + every spoke (used by previews),
 //                         baseUrl from $BASE_URL (e.g. /pr/<id>/<N>/).
 //   SPOKE=<id>         → that spoke alone, baseUrl = /<rbp>/.
 //
@@ -45,7 +53,7 @@ const fs = require("fs") as typeof import("fs");
 // Each spoke owns its own `docs-versions/` (versions.json + versioned_docs/
 // + versioned_sidebars/) which clone-spokes.sh symlinks into hub root with
 // the appropriate `<id>_` prefix per plugin instance.
-const HUB_ONLY = process.env.HUB_ONLY === "1";
+const ROOT_REDIRECT = process.env.ROOT_REDIRECT === "1";
 const BUILD_ALL_SPOKES = process.env.BUILD_ALL_SPOKES === "1";
 const SPOKE = (process.env.SPOKE ?? "").trim();
 
@@ -58,10 +66,12 @@ if (!SITE_URL) {
 }
 const SITE_ORIGIN = SITE_URL.replace(/\/+$/, "");
 
-const modesSet = [HUB_ONLY, BUILD_ALL_SPOKES, !!SPOKE].filter(Boolean).length;
+const modesSet = [ROOT_REDIRECT, BUILD_ALL_SPOKES, !!SPOKE].filter(
+  Boolean,
+).length;
 if (modesSet !== 1) {
   throw new Error(
-    "Exactly one build mode must be set: HUB_ONLY=1, BUILD_ALL_SPOKES=1, or SPOKE=<id>.",
+    "Exactly one build mode must be set: ROOT_REDIRECT=1, BUILD_ALL_SPOKES=1, or SPOKE=<id>.",
   );
 }
 const SPOKE_MODE = !!SPOKE;
@@ -70,6 +80,23 @@ const selectedSpoke = SPOKE_MODE
   : undefined;
 if (SPOKE_MODE && !selectedSpoke) {
   throw new Error(`SPOKE='${SPOKE}' not found in spokes.yml.`);
+}
+
+// Builds that own the site root (ROOT_REDIRECT and BUILD_ALL_SPOKES) emit the
+// "/" → spoke redirect, so they require a valid rootRedirectSpoke. SPOKE builds
+// never serve "/", so the field is irrelevant there.
+const rootRedirectSpoke = allSpokes.find((s) => s.id === ROOT_REDIRECT_SPOKE_ID);
+if (!SPOKE_MODE) {
+  if (!ROOT_REDIRECT_SPOKE_ID) {
+    throw new Error(
+      "spokes.yml must set `rootRedirectSpoke: <id>` — the spoke the site root redirects to.",
+    );
+  }
+  if (!rootRedirectSpoke) {
+    throw new Error(
+      `rootRedirectSpoke '${ROOT_REDIRECT_SPOKE_ID}' does not match any spoke id in spokes.yml.`,
+    );
+  }
 }
 
 // Resolved baseUrl for this build. Reused by navbar links so cross-bundle
@@ -90,7 +117,7 @@ const SPOKES_ROOT = SPOKE_MODE
   ? BASE_URL.replace(new RegExp(`${selectedSpoke!.routeBasePath}/$`), "")
   : BASE_URL;
 
-const spokes: SpokeConfig[] = HUB_ONLY
+const spokes: SpokeConfig[] = ROOT_REDIRECT
   ? []
   : BUILD_ALL_SPOKES
     ? allSpokes
@@ -223,7 +250,7 @@ const [firstSpoke, ...otherSpokes] = spokes;
 
 const spokePlugins: PluginConfig[] = [
   // The first spoke is wired via presets.classic.docs (below), so we only emit
-  // docs plugins for additional spokes. In hub-only builds (no spoke
+  // docs plugins for additional spokes. In root-redirect builds (no spoke
   // checkouts) `firstSpoke` is undefined and there's nothing to wire here.
   ...otherSpokes.map(docsPlugin),
   ...spokes.flatMap((spoke) =>
@@ -265,6 +292,44 @@ if (openvinoSpoke) {
   ]);
 }
 
+// Site root ("/") redirect. ROOT_REDIRECT and BUILD_ALL_SPOKES own the root of
+// their bundle; instead of a hub landing page we emit a single index.html that
+// forwards visitors to the configured spoke's landing. The target is
+// root-relative so it works at every deploy prefix (prod "/", previews
+// "/pr/hub/<N>/"): BASE_URL already ends in "/", so `${BASE_URL}<rbp>/`
+// resolves to e.g. "/openvino/" or "/pr/hub/12/openvino/".
+if (!SPOKE_MODE) {
+  const target = `${BASE_URL}${rootRedirectSpoke!.routeBasePath}/`;
+  const canonical = `${SITE_ORIGIN}${target}`;
+  const redirectHtml = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Redirecting…</title>
+    <meta http-equiv="refresh" content="0; url=${target}" />
+    <link rel="canonical" href="${canonical}" />
+  </head>
+  <body>
+    <script>
+      location.replace(${JSON.stringify(target)} + location.search + location.hash);
+    </script>
+    <p>Redirecting to <a href="${target}">the documentation</a>…</p>
+  </body>
+</html>
+`;
+  const rootRedirectPlugin: PluginConfig = () => ({
+    name: "root-redirect",
+    async postBuild({ outDir }: { outDir: string }) {
+      await fs.promises.writeFile(
+        path.join(outDir, "index.html"),
+        redirectHtml,
+        "utf8",
+      );
+    },
+  });
+  spokePlugins.push(rootRedirectPlugin);
+}
+
 const config: Config = {
   title: "OpenVINO Documentation",
   favicon: "img/favicon.png",
@@ -275,7 +340,7 @@ const config: Config = {
   // entirely (its assets are emitted under it). Each deploy mode picks a
   // disjoint baseUrl so multiple bundles can coexist on the same bucket
   // without `--delete` wiping each other's assets:
-  //   HUB_ONLY=1         → / (or $BASE_URL).
+  //   ROOT_REDIRECT=1    → / (or $BASE_URL).
   //   BUILD_ALL_SPOKES=1 → $BASE_URL (e.g. /pr/<id>/<N>/).
   //   SPOKE=<id>         → /<rbp>/ (or $BASE_URL for previews).
   baseUrl: BASE_URL,
@@ -297,16 +362,13 @@ const config: Config = {
       repo: s.repo,
       href: `${SITE_ORIGIN}${SPOKES_ROOT}${s.routeBasePath}/`,
     })),
-    // Absolute URL of the hub landing page (OpenVINO's landing IS the hub root).
-    // Used by the ProductGridDropdown so the OpenVINO card always links to the
-    // hub, even when the current bundle is a spoke at a prefixed baseUrl.
-    hubUrl: `${SITE_ORIGIN}${SPOKES_ROOT}`,
     // The spoke this bundle was built for (SPOKE mode only). Baked at build
     // time so useCurrentSpoke can trust it instead of parsing a prefixed URL.
     currentSpokeId: SPOKE_MODE ? selectedSpoke!.id : undefined,
-    // IDs of spokes whose doc routes exist in this bundle. Empty in HUB_ONLY;
-    // one entry in SPOKE mode; all entries in BUILD_ALL_SPOKES. Used by
-    // DocumentationLink to decide between client-side and full-page navigation.
+    // IDs of spokes whose doc routes exist in this bundle. Empty in
+    // ROOT_REDIRECT; one entry in SPOKE mode; all entries in BUILD_ALL_SPOKES.
+    // Used by DocumentationLink to decide between client-side and full-page
+    // navigation.
     bundledSpokeIds: spokes.map((s) => s.id),
   },
 
@@ -324,12 +386,12 @@ const config: Config = {
     [
       "classic",
       {
-        docs: HUB_ONLY ? false : docsPluginOptions(firstSpoke),
+        docs: ROOT_REDIRECT ? false : docsPluginOptions(firstSpoke),
         blog: false,
-        // The hub landing under src/pages/ is only relevant for builds that
-        // include the hub itself (HUB_ONLY, BUILD_ALL_SPOKES). In SPOKE mode
-        // the bundle is the spoke alone and must not emit a hub landing.
-        pages: SPOKE_MODE ? false : undefined,
+        // No src/pages/ landing: the site root is served by the root-redirect
+        // plugin (see above), and spoke bundles never own "/". Disabling pages
+        // everywhere keeps every bundle free of a stray hub landing route.
+        pages: false,
         theme: { customCss: "./src/css/custom.css" },
       } satisfies Preset.Options,
     ],
@@ -339,10 +401,10 @@ const config: Config = {
 
   themes: [
     // The search theme's <SearchBar> hooks into the docs plugin's global
-    // data. In hub-only builds there's no docs plugin, so we drop the
-    // search theme entirely (the hub landing has no content to search).
+    // data. In root-redirect builds there's no docs plugin, so we drop the
+    // search theme entirely (the redirect bundle has no content to search).
 
-    ...(HUB_ONLY
+    ...(ROOT_REDIRECT
       ? []
       : ([
           [
@@ -394,7 +456,7 @@ const config: Config = {
                 position: "right" as const,
               },
             ]
-          : HUB_ONLY
+          : ROOT_REDIRECT
             ? []
             : allSpokes.map((spoke) => ({
                 type: "custom-spokeVersionDropdown" as const,
