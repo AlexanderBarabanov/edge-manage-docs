@@ -124,6 +124,38 @@ Exactly one build mode env var must be set (`BUILD_ALL_SPOKES`, `SPOKE`, or `ROO
 
 Requirements: Node 22, `git`, `git-lfs` (if any spoke uses LFS).
 
+## Site root redirect
+
+There is no standalone hub landing page. The site root (`/`) is a single
+generated `index.html` that immediately redirects to one spoke's landing page.
+Which spoke that is comes from the top-level `rootRedirectSpoke` key in
+[`spokes.yml`](spokes.yml):
+
+```yaml
+rootRedirectSpoke: openvino   # / → /openvino/
+
+spokes:
+  - id: openvino
+    routeBasePath: openvino
+    # ...
+```
+
+How it works:
+
+- `rootRedirectSpoke` must equal one of the `spokes[].id` values. The build
+  looks that id up and uses the spoke's `routeBasePath` as the redirect target,
+  so `rootRedirectSpoke: openvino` makes `/` forward to `/openvino/`.
+- The redirect target is **base-URL-relative**, so it follows whatever prefix
+  the bundle is deployed under: `/openvino/` in production, `/pr/hub/<N>/openvino/`
+  in a preview.
+- The root `index.html` is emitted only by builds that own `/` — `ROOT_REDIRECT`
+  (root only) and `BUILD_ALL_SPOKES` (root + every spoke). A single-spoke
+  `SPOKE=<id>` build is rooted at `/<rbp>/` and never writes `/`, so the field
+  is ignored there.
+- Because root-owning builds require it, an empty or unknown `rootRedirectSpoke`
+  aborts the build with a clear error. To change the landing product, point the
+  key at a different spoke id — no code change needed.
+
 ## How the dispatch flow works
 
 Spoke CI dispatches `deploy-preview` to the hub with `{ repo, branch, pr_number, sha }`.

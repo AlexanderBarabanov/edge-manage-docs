@@ -86,7 +86,7 @@ gh api repos/AlexanderBarabanov/edge-manage-docs/dispatches \
 ```sh
 npm install
 
-# Hub + all spokes
+# Root redirect page + all spokes
 BUILD_ALL_SPOKES=1 BASE_URL=/ SITE_URL=https://docs.example.com npm run build
 
 # Root redirect + one spoke (two builds — matches spoke PR preview)
