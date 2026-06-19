@@ -1,7 +1,7 @@
 # Spoke whose landing the site root ("/") redirects to. This is the only
 # content served at the bucket root now that there is no standalone hub
 # landing — the root deploy emits a single index.html forwarding here.
-rootRedirectSpoke: genai
+rootRedirectSpoke: openvino
 
 spokes:
   - repo: AlexanderBarabanov/openvino.genai
