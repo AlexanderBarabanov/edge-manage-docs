@@ -89,12 +89,12 @@ npm install
 # Root redirect page + all spokes
 BUILD_ALL_SPOKES=1 BASE_URL=/ SITE_URL=https://docs.example.com npm run build
 
-# Root redirect + one spoke (two builds — matches spoke PR preview)
-ROOT_REDIRECT=1 BASE_URL=/ SITE_URL=https://docs.example.com npm run build
-SPOKE=genai BASE_URL=/genai/ SITE_URL=https://docs.example.com npm run build
+# One spoke, nested under /<rbp>/ with a "/" → /<rbp>/ redirect, so the
+# served root lands on the spoke (local-only layout)
+SPOKE=genai SITE_URL=https://docs.example.com npm run build
 
-# Single spoke at its prod path
-SPOKE=genai BASE_URL=/genai/ SITE_URL=https://docs.example.com npm run build
+# Single spoke as the prod per-spoke artifact (rooted at /<rbp>/, no redirect)
+CI=1 SPOKE=genai BASE_URL=/genai/ SITE_URL=https://docs.example.com npm run build
 
 # Site root redirect only
 ROOT_REDIRECT=1 BASE_URL=/ SITE_URL=https://docs.example.com npm run build
@@ -104,5 +104,7 @@ ROOT_REDIRECT=1 BASE_URL=/ SITE_URL=https://docs.example.com npm run build
 
 npm run serve   # serve build/ at localhost:3000
 ```
+
+A local `SPOKE=<id>` build redirects `/` to that spoke, so `npm run serve` lands on it. In CI (`CI=true`) the same command builds the production per-spoke artifact rooted at `/<rbp>/`; set `CI=1` locally to reproduce it.
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for spoke content conventions and how to register a new spoke.

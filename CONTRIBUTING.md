@@ -112,6 +112,9 @@ npm install
 # Build everything
 BUILD_ALL_SPOKES=1 BASE_URL=/ SITE_URL=https://docs.example.com npm run build
 
+# Build one spoke only (root "/" redirects to it, so `npm run serve` lands on it)
+SPOKE=openvino SITE_URL=https://docs.example.com npm run build
+
 # Build against a specific branch or commit (without editing spokes.yml)
 ./scripts/clone-spokes.sh --override=owner/your-repo:my-branch
 BUILD_ALL_SPOKES=1 BASE_URL=/ SITE_URL=https://docs.example.com npm run build
@@ -121,6 +124,12 @@ npm start           # hot-reload dev server (BUILD_ALL_SPOKES=1 required)
 ```
 
 Exactly one build mode env var must be set (`BUILD_ALL_SPOKES`, `SPOKE`, or `ROOT_REDIRECT`) or the build aborts.
+
+A local `SPOKE=<id>` build nests the spoke under `/<rbp>/` (baseUrl `/`) and
+adds a `/` → `/<rbp>/` redirect, so opening `localhost:3000/` lands on the
+spoke. In CI (`CI=true`) the same `SPOKE=<id>` command instead produces the
+production per-spoke artifact rooted at `/<rbp>/`. Set `CI=1` locally to
+reproduce that exact artifact.
 
 Requirements: Node 22, `git`, `git-lfs` (if any spoke uses LFS).
 
@@ -149,9 +158,10 @@ How it works:
   the bundle is deployed under: `/openvino/` in production, `/pr/hub/<N>/openvino/`
   in a preview.
 - The root `index.html` is emitted only by builds that own `/` — `ROOT_REDIRECT`
-  (root only) and `BUILD_ALL_SPOKES` (root + every spoke). A single-spoke
-  `SPOKE=<id>` build is rooted at `/<rbp>/` and never writes `/`, so the field
-  is ignored there.
+  (root only), `BUILD_ALL_SPOKES` (root + every spoke), and local single-spoke
+  builds (`SPOKE=<id>` without `CI`, which redirect `/` to that one spoke). The
+  production per-spoke build (`CI=true SPOKE=<id>`) is rooted at `/<rbp>/` and
+  never writes `/`, so `rootRedirectSpoke` is ignored there.
 - Because root-owning builds require it, an empty or unknown `rootRedirectSpoke`
   aborts the build with a clear error. To change the landing product, point the
   key at a different spoke id — no code change needed.

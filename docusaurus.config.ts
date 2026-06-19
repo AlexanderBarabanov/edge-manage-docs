@@ -47,7 +47,11 @@ const fs = require("fs") as typeof import("fs");
 //                        spokes.yml. baseUrl = / (or $BASE_URL).
 //   BUILD_ALL_SPOKES=1 → root redirect + every spoke (used by previews),
 //                         baseUrl from $BASE_URL (e.g. /pr/<id>/<N>/).
-//   SPOKE=<id>         → that spoke alone, baseUrl = /<rbp>/.
+//   SPOKE=<id>         → that spoke alone. In CI: baseUrl = /<rbp>/, the bundle
+//                        owns "/" and `build/` deploys to the spoke's prefix.
+//                        Locally (no CI): baseUrl = / with the spoke nested
+//                        under /<rbp>/ plus a "/" → /<rbp>/ redirect, so a
+//                        single `npm run serve`/`start` lands on the spoke.
 //
 // Versioning is handled by Docusaurus' standard multi-version docs plugin.
 // Each spoke owns its own `docs-versions/` (versions.json + versioned_docs/
@@ -56,6 +60,12 @@ const fs = require("fs") as typeof import("fs");
 const ROOT_REDIRECT = process.env.ROOT_REDIRECT === "1";
 const BUILD_ALL_SPOKES = process.env.BUILD_ALL_SPOKES === "1";
 const SPOKE = (process.env.SPOKE ?? "").trim();
+
+// GitHub Actions (and most CI) set CI=true. It only affects how a single-spoke
+// build (SPOKE=<id>) is laid out — see LOCAL_SINGLE_SPOKE / SPOKE_MODE below.
+// Every multi-bundle/deploy decision stays env-driven, so CI never changes the
+// production artifact.
+const CI = /^(1|true|yes)$/i.test((process.env.CI ?? "").trim());
 
 // Site origin (no trailing slash). Used for the canonical site URL and for
 // cross-bundle navbar links (those need an absolute URL so Docusaurus treats
@@ -74,19 +84,34 @@ if (modesSet !== 1) {
     "Exactly one build mode must be set: ROOT_REDIRECT=1, BUILD_ALL_SPOKES=1, or SPOKE=<id>.",
   );
 }
-const SPOKE_MODE = !!SPOKE;
-const selectedSpoke = SPOKE_MODE
+const selectedSpoke = SPOKE
   ? allSpokes.find((s) => s.id === SPOKE)
   : undefined;
-if (SPOKE_MODE && !selectedSpoke) {
+if (SPOKE && !selectedSpoke) {
   throw new Error(`SPOKE='${SPOKE}' not found in spokes.yml.`);
 }
 
-// Builds that own the site root (ROOT_REDIRECT and BUILD_ALL_SPOKES) emit the
-// "/" → spoke redirect, so they require a valid rootRedirectSpoke. SPOKE builds
-// never serve "/", so the field is irrelevant there.
-const rootRedirectSpoke = allSpokes.find((s) => s.id === ROOT_REDIRECT_SPOKE_ID);
-if (!SPOKE_MODE) {
+// A single-spoke build behaves differently depending on where it runs:
+//   - In CI it is the production per-spoke deploy (SPOKE_MODE): the bundle is
+//     rooted at /<rbp>/ and owns "/", so `build/` syncs straight to the
+//     spoke's S3 prefix.
+//   - Locally (LOCAL_SINGLE_SPOKE) we build the spoke with the multi-spoke
+//     layout instead — baseUrl "/", the spoke nested under /<rbp>/, plus a
+//     root redirect to it — so `docusaurus serve`/`start` makes "/" land on
+//     the spoke, mirroring production's hub root redirect. Set CI=1 locally to
+//     reproduce the exact production per-spoke artifact.
+const LOCAL_SINGLE_SPOKE = !!SPOKE && !CI;
+const SPOKE_MODE = !!SPOKE && CI;
+
+// Builds that own the site root emit the "/" → spoke redirect, so they need a
+// redirect target. ROOT_REDIRECT and BUILD_ALL_SPOKES use the configured
+// `rootRedirectSpoke`; a LOCAL_SINGLE_SPOKE build redirects to the one spoke it
+// is building. SPOKE_MODE (production per-spoke) never serves "/", so the field
+// is irrelevant there.
+const rootRedirectSpoke = LOCAL_SINGLE_SPOKE
+  ? selectedSpoke
+  : allSpokes.find((s) => s.id === ROOT_REDIRECT_SPOKE_ID);
+if (!SPOKE_MODE && !LOCAL_SINGLE_SPOKE) {
   if (!ROOT_REDIRECT_SPOKE_ID) {
     throw new Error(
       "spokes.yml must set `rootRedirectSpoke: <id>` — the spoke the site root redirects to.",
@@ -458,7 +483,7 @@ const config: Config = {
             ]
           : ROOT_REDIRECT
             ? []
-            : allSpokes.map((spoke) => ({
+              : spokes.map((spoke) => ({
                 type: "custom-spokeVersionDropdown" as const,
                 position: "right" as const,
                 docsPluginId: docsPluginId(spoke),
