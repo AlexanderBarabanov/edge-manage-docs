@@ -4,8 +4,8 @@ name: Main
 # then delegates to deploy.yml.
 #
 # trigger                       → outcome
-# push to main                  → hub at /
-# hub PR labeled                → hub + all spokes at pr/hub/<N>/
+# push to main                  → root redirect at /
+# hub PR labeled                → root redirect + all spokes at pr/hub/<N>/
 # repository_dispatch preview   → hub + spoke at pr/<spoke>/<N>/
 # repository_dispatch merge     → spoke at /<rbp>/
 # repository_dispatch close     → remove pr/<spoke>/<N>/

@@ -4,7 +4,7 @@ Hub-spoke Docusaurus platform. The hub owns the framework, theme, and deployment
 
 ## Architecture
 
-The hub and each spoke are **independent self-contained websites**, each with its own S3 prefix. They share a domain and a common theme but are built and deployed separately — a spoke deploy never touches the hub prefix, and vice versa.
+Each spoke is **independent self-contained website**, each with its own S3 prefix. They share a domain and a common theme but are built and deployed separately. The hub deployment is a configuration of redirection to one of spokes landing page from the root index.
 
 Spokes are repos with a `docs/` folder. The hub clones a spoke at build time, produces a standalone Docusaurus bundle for it, and deploys that bundle to `/<routeBasePath>/`. The hub itself builds separately and deploys to `/`. Spokes need no Docusaurus config.
 
@@ -89,15 +89,15 @@ npm install
 # Hub + all spokes
 BUILD_ALL_SPOKES=1 BASE_URL=/ SITE_URL=https://docs.example.com npm run build
 
-# Hub + one spoke (two builds — matches spoke PR preview)
-HUB_ONLY=1 BASE_URL=/ SITE_URL=https://docs.example.com npm run build
+# Root redirect + one spoke (two builds — matches spoke PR preview)
+ROOT_REDIRECT=1 BASE_URL=/ SITE_URL=https://docs.example.com npm run build
 SPOKE=genai BASE_URL=/genai/ SITE_URL=https://docs.example.com npm run build
 
 # Single spoke at its prod path
 SPOKE=genai BASE_URL=/genai/ SITE_URL=https://docs.example.com npm run build
 
-# Hub only
-HUB_ONLY=1 BASE_URL=/ SITE_URL=https://docs.example.com npm run build
+# Site root redirect only
+ROOT_REDIRECT=1 BASE_URL=/ SITE_URL=https://docs.example.com npm run build
 
 # Use a local spoke checkout instead of cloning from GitHub
 ./scripts/clone-spokes.sh --use-local=owner/repo:/abs/path/to/checkout

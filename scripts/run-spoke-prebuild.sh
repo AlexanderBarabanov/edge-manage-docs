@@ -4,7 +4,7 @@
 # spokes.yml as `docusaurus <command>`.
 #
 # Active spokes are picked the same way as clone-spokes.sh:
-#   HUB_ONLY=1          → none
+#   ROOT_REDIRECT=1     → none
 #   BUILD_ALL_SPOKES=1  → every spoke
 #   SPOKE=<id>          → just that one
 #
@@ -19,8 +19,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SPOKES_YML="$ROOT_DIR/spokes.yml"
 
-if [[ "${HUB_ONLY:-}" == "1" ]]; then
-  echo "HUB_ONLY=1: skipping spoke prebuild commands."
+if [[ "${ROOT_REDIRECT:-}" == "1" ]]; then
+  echo "ROOT_REDIRECT=1: skipping spoke prebuild commands."
   exit 0
 fi
 
@@ -31,7 +31,7 @@ if [[ "$BUILD_ALL_SPOKES_FLAG" == "1" && -n "$SPOKE_ID" ]]; then
   exit 1
 fi
 if [[ "$BUILD_ALL_SPOKES_FLAG" != "1" && -z "$SPOKE_ID" ]]; then
-  echo "Error: set BUILD_ALL_SPOKES=1 or SPOKE=<id> (HUB_ONLY=1 already handled above)." >&2
+  echo "Error: set BUILD_ALL_SPOKES=1 or SPOKE=<id> (ROOT_REDIRECT=1 already handled above)." >&2
   exit 1
 fi
 

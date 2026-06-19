@@ -44,7 +44,7 @@ jobs:
       - uses: ./.github/actions/setup-build
       - name: Build
         env:
-          HUB_ONLY:        ${{ inputs.mode == 'hub' && '1' || '' }}
+          ROOT_REDIRECT:   ${{ inputs.mode == 'hub' && '1' || '' }}
           SPOKE:           ${{ inputs.mode == 'spoke' && inputs.spoke_id || '' }}
           SPOKE_OVERRIDES: ${{ inputs.spoke_overrides }}
           SITE_URL:        ${{ secrets.DEV_URL }}
