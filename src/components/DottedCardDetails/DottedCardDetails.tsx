@@ -1,7 +1,7 @@
-import { ReactNode, useEffect, useMemo, useState } from "react";
+import { ReactNode, useState } from "react";
+import { Code } from "../Code/Code";
 import { Link } from "../Link/Link";
 import styles from "./DottedCardDetails.module.css";
-import { Code } from "../Code/Code";
 
 type CodeSnippet = {
   code: string;
