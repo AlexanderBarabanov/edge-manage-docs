@@ -84,9 +84,7 @@ if (modesSet !== 1) {
     "Exactly one build mode must be set: ROOT_REDIRECT=1, BUILD_ALL_SPOKES=1, or SPOKE=<id>.",
   );
 }
-const selectedSpoke = SPOKE
-  ? allSpokes.find((s) => s.id === SPOKE)
-  : undefined;
+const selectedSpoke = SPOKE ? allSpokes.find((s) => s.id === SPOKE) : undefined;
 if (SPOKE && !selectedSpoke) {
   throw new Error(`SPOKE='${SPOKE}' not found in spokes.yml.`);
 }
@@ -285,38 +283,6 @@ const spokePlugins: PluginConfig[] = [
   ),
 ];
 
-// OpenVINO is the only spoke without a landing page of its own: its product
-// landing IS the hub root ("/"). Now that its docs live on the shared
-// `<rbp>/docs/` segment like every other spoke, the bare `/openvino/` path
-// has nothing mounted on it and would 404, so redirect it to the docs root.
-// `from`/`to` are baseUrl-relative — the plugin writes the redirect file under
-// outDir/<from> and prepends baseUrl to <to> — so the same pair works in every
-// mode (SPOKE=openvino roots the bundle at /openvino/, hence from "/"). Only
-// emitted when the OpenVINO spoke is in this build; the plugin runs on
-// `build`, not on `docusaurus start`.
-//
-// Expected side effect: in SPOKE=openvino mode the build reports broken-link
-// warnings for `/openvino/`. That path is now redirect-only, but Docusaurus'
-// link checker runs before this plugin's postBuild and doesn't know about the
-// redirect, so anything pointing at baseUrl (the navbar brand/logo, the
-// OpenVINO product card) is flagged. The links resolve correctly at runtime
-// via the redirect, and `onBrokenLinks: "warn"` lets the build pass — these
-// specific warnings are benign.
-const openvinoSpoke = spokes.find(({ id }) => id === "openvino");
-if (openvinoSpoke) {
-  spokePlugins.push([
-    "@docusaurus/plugin-client-redirects",
-    {
-      redirects: [
-        {
-          from: SPOKE_MODE ? "/" : `/${openvinoSpoke.routeBasePath}/`,
-          to: SPOKE_MODE ? "/docs/" : `/${openvinoSpoke.routeBasePath}/docs/`,
-        },
-      ],
-    },
-  ]);
-}
-
 // Site root ("/") redirect. ROOT_REDIRECT and BUILD_ALL_SPOKES own the root of
 // their bundle; instead of a hub landing page we emit a single index.html that
 // forwards visitors to the configured spoke's landing. The target is
@@ -483,7 +449,7 @@ const config: Config = {
             ]
           : ROOT_REDIRECT
             ? []
-              : spokes.map((spoke) => ({
+            : spokes.map((spoke) => ({
                 type: "custom-spokeVersionDropdown" as const,
                 position: "right" as const,
                 docsPluginId: docsPluginId(spoke),
