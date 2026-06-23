@@ -1,6 +1,6 @@
-import type { LoadContext, Plugin } from '@docusaurus/types';
-import { access, mkdir, opendir, writeFile } from 'fs/promises';
-import path from 'path';
+import type { LoadContext, Plugin } from "@docusaurus/types";
+import { access, mkdir, opendir, writeFile } from "fs/promises";
+import path from "path";
 
 export type GenAISample = {
   language: string;
@@ -35,10 +35,10 @@ export type GenAISamplesDocsPluginOptions = {
 };
 
 const LANGUAGE_TITLES: Record<string, string> = {
-  c: 'C',
-  cpp: 'C++',
-  js: 'JavaScript',
-  python: 'Python',
+  c: "C",
+  cpp: "C++",
+  js: "JavaScript",
+  python: "Python",
 };
 
 async function findSamples(options: GenAISamplesDocsPluginOptions): Promise<GenAISamples> {
@@ -53,7 +53,7 @@ async function findSamples(options: GenAISamplesDocsPluginOptions): Promise<GenA
       if (!subdir.isDirectory()) continue;
       if (!samplesMap[language]) samplesMap[language] = [];
 
-      const hasReadme = await access(path.join(dirPath, subdir.name, 'README.md'))
+      const hasReadme = await access(path.join(dirPath, subdir.name, "README.md"))
         .then(() => true)
         .catch(() => false);
 
@@ -63,7 +63,7 @@ async function findSamples(options: GenAISamplesDocsPluginOptions): Promise<GenA
         name: subdir.name,
         hasReadme,
         githubLink: `${options.githubBaseUrl}/${language}/${subdir.name}`,
-        docLink: `${options.docsRouteBase.replace(/\/$/, '')}/${language}/${subdir.name}`,
+        docLink: `${options.docsRouteBase.replace(/\/$/, "")}/${language}/${subdir.name}`,
       });
     }
   }
@@ -90,11 +90,11 @@ async function writeCategory(language: string, dirPath: string): Promise<void> {
   const content = {
     label: language,
     link: {
-      type: 'generated-index',
+      type: "generated-index",
       description: `OpenVINO GenAI ${language} samples`,
     },
   };
-  await writeFile(path.join(dirPath, '_category_.json'), JSON.stringify(content, null, 2));
+  await writeFile(path.join(dirPath, "_category_.json"), JSON.stringify(content, null, 2));
 }
 
 async function writeSampleDocFile(
@@ -130,8 +130,8 @@ export default function genaiSamplesDocsPlugin(
   _context: LoadContext,
   options: GenAISamplesDocsPluginOptions,
 ): Plugin {
-  const pluginName = 'genai-samples-docs-plugin';
-  const pluginId = options.id ?? 'default';
+  const pluginName = "genai-samples-docs-plugin";
+  const pluginId = options.id ?? "default";
   return {
     name: pluginName,
     async loadContent() {
@@ -144,7 +144,7 @@ export default function genaiSamplesDocsPlugin(
       // The CLI command is scoped to the plugin instance to disambiguate when
       // multiple instances of the plugin are registered.
       const cmd =
-        pluginId === 'default'
+        pluginId === "default"
           ? `generate-samples-docs:${pluginName}`
           : `generate-samples-docs:${pluginName}:${pluginId}`;
       cli
@@ -156,7 +156,7 @@ export default function genaiSamplesDocsPlugin(
           );
           const samplesMap = await findSamples(options);
           await generateSamplesDocs(samplesMap, options);
-          console.info('Sample docs generated.');
+          console.info("Sample docs generated.");
         });
     },
   };

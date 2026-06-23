@@ -13,11 +13,7 @@ export const InstallOpenvino = () => {
   return (
     <Section>
       <Section.Icon>
-        <img
-          className={styles.icon}
-          src={assetUrl("img/install.png")}
-          alt="install"
-        />
+        <img className={styles.icon} src={assetUrl("img/install.png")} alt="install" />
       </Section.Icon>
 
       <Section.Title>Install OpenVINO™</Section.Title>
@@ -31,17 +27,11 @@ export const InstallOpenvino = () => {
       </Section.Description>
 
       <div className={styles.containerOptions}>
-        <a
-          className={styles.installButton}
-          href={`${href}#installing-openvino-runtime`}
-        >
+        <a className={styles.installButton} href={`${href}#installing-openvino-runtime`}>
           pip install openvino
         </a>
 
-        <Link
-          href={`${href}#installing-openvino-runtime`}
-          label="Advanced installation options"
-        />
+        <Link href={`${href}#installing-openvino-runtime`} label="Advanced installation options" />
       </div>
 
       <div className={styles.twoColumnsFiveRowsGrid}>
@@ -65,10 +55,7 @@ export const InstallOpenvino = () => {
             ]}
           />
 
-          <img
-            className={styles.blendModeLighten}
-            src={assetUrl("img/openvino-ir.png")}
-          />
+          <img className={styles.blendModeLighten} src={assetUrl("img/openvino-ir.png")} />
         </div>
 
         <div className={styles.row2}>
@@ -76,10 +63,7 @@ export const InstallOpenvino = () => {
         </div>
 
         <div className={styles.row3}>
-          <img
-            className={styles.blendModeLighten}
-            src={assetUrl("img/optimize-model.png")}
-          />
+          <img className={styles.blendModeLighten} src={assetUrl("img/optimize-model.png")} />
 
           <DottedCardDetails
             title="Optimize your model"
@@ -130,10 +114,7 @@ export const InstallOpenvino = () => {
             ]}
           />
 
-          <img
-            className={styles.blendModeLighten}
-            src={assetUrl("img/run-and-infer.png")}
-          />
+          <img className={styles.blendModeLighten} src={assetUrl("img/run-and-infer.png")} />
         </div>
       </div>
     </Section>

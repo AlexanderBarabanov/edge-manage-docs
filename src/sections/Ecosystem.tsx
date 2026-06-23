@@ -14,11 +14,7 @@ export const Ecosystem = () => {
   return (
     <Section>
       <Section.Icon>
-        <img
-          className={styles.icon}
-          src={assetUrl("img/ecosystem.png")}
-          alt="Ecosystem"
-        />
+        <img className={styles.icon} src={assetUrl("img/ecosystem.png")} alt="Ecosystem" />
       </Section.Icon>
 
       <Section.Title>Ecosystem</Section.Title>
@@ -64,10 +60,7 @@ export const Ecosystem = () => {
         <DottedCardDetails
           title={
             <>
-              NNCF{" "}
-              <span className={styles.titleDetails}>
-                Neural Network Compression Framework
-              </span>
+              NNCF <span className={styles.titleDetails}>Neural Network Compression Framework</span>
             </>
           }
           description="A suite of post-training and training-time algorithms for optimizing inference"

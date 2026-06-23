@@ -8,6 +8,6 @@
 
 .breadcrumbs__item:not(:last-child)::after {
   background: none;
-  content: '/';
+  content: "/";
   margin: 0;
 }

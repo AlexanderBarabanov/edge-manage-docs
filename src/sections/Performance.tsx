@@ -1,10 +1,9 @@
-import useDocusaurusContext from "@docusaurus/useDocusaurusContext";
 import { DottedCardDetails } from "../components/DottedCardDetails/DottedCardDetails";
 import { Section } from "../components/Section/Section";
+import { useAssetUrl } from "../hooks/use-asset-url";
 import { useSpokeHref } from "../hooks/use-spoke-href";
 import { OpenVINOHub } from "../hub-catalog";
 import styles from "./Performance.module.css";
-import { useAssetUrl } from "../hooks/use-asset-url";
 
 export const Performance = () => {
   const assetUrl = useAssetUrl();
@@ -13,11 +12,7 @@ export const Performance = () => {
   return (
     <Section>
       <Section.Icon>
-        <img
-          className={styles.icon}
-          src={assetUrl("img/performance.png")}
-          alt="performance"
-        />
+        <img className={styles.icon} src={assetUrl("img/performance.png")} alt="performance" />
       </Section.Icon>
 
       <Section.Title>Performance that matters</Section.Title>
@@ -29,10 +24,7 @@ export const Performance = () => {
 
       <div className={styles.grid}>
         <div>
-          <img
-            className={styles.blendModeLighten}
-            src={assetUrl("img/openvino-runtime.png")}
-          />
+          <img className={styles.blendModeLighten} src={assetUrl("img/openvino-runtime.png")} />
         </div>
         <DottedCardDetails
           title="Optimize for latency"
@@ -66,10 +58,7 @@ export const Performance = () => {
           ]}
         />
         <div>
-          <img
-            className={styles.blendModeLighten}
-            src={assetUrl("img/throughput-runtime.png")}
-          />
+          <img className={styles.blendModeLighten} src={assetUrl("img/throughput-runtime.png")} />
         </div>
       </div>
     </Section>
