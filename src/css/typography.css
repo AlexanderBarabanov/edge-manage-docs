@@ -1,6 +1,5 @@
 @font-face {
-  src: url("../../static/fonts/roboto-flex-v30-latin-regular.woff2")
-    format("woff2");
+  src: url("../../static/fonts/roboto-flex-v30-latin-regular.woff2") format("woff2");
   font-family: "Roboto Flex";
   font-style: normal;
   font-weight: 400;
@@ -22,9 +21,9 @@
   --genai-font-family:
     var(--global-font-roboto), var(--global-font-apple-system),
     var(--global-font-blink-mac-system-font), var(--global-font-segoe-ui),
-    var(--global-font-helvetica), var(--global-font-arial),
-    var(--global-font-sans-serif), var(--global-font-apple-color-emoji),
-    var(--global-font-segoe-ui-emoji), var(--global-font-segoe-ui-symbol);
+    var(--global-font-helvetica), var(--global-font-arial), var(--global-font-sans-serif),
+    var(--global-font-apple-color-emoji), var(--global-font-segoe-ui-emoji),
+    var(--global-font-segoe-ui-symbol);
 
   --ifm-font-family-base: var(--genai-font-family);
 }

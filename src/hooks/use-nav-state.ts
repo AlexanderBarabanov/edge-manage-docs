@@ -40,8 +40,7 @@ export const useNavState = (): NavState => {
 
   const docsActive = pathname.startsWith(`${landingPath}docs/`);
   // `!docsActive` keeps the two states mutually exclusive by construction.
-  const productActive =
-    !docsActive && (pathname === baseUrl || pathname === landingPath);
+  const productActive = !docsActive && (pathname === baseUrl || pathname === landingPath);
 
   return { productActive, docsActive };
 };

@@ -24,9 +24,7 @@ type SpokesYml = {
 const REPO_ROOT = __dirname;
 const SPOKES_DIR = "spokes";
 
-const spokesYml = yamlLoad(
-  readFileSync(path.join(REPO_ROOT, "spokes.yml"), "utf8"),
-) as SpokesYml;
+const spokesYml = yamlLoad(readFileSync(path.join(REPO_ROOT, "spokes.yml"), "utf8")) as SpokesYml;
 
 const allSpokes: SpokeConfig[] = spokesYml.spokes;
 
@@ -76,9 +74,7 @@ if (!SITE_URL) {
 }
 const SITE_ORIGIN = SITE_URL.replace(/\/+$/, "");
 
-const modesSet = [ROOT_REDIRECT, BUILD_ALL_SPOKES, !!SPOKE].filter(
-  Boolean,
-).length;
+const modesSet = [ROOT_REDIRECT, BUILD_ALL_SPOKES, !!SPOKE].filter(Boolean).length;
 if (modesSet !== 1) {
   throw new Error(
     "Exactly one build mode must be set: ROOT_REDIRECT=1, BUILD_ALL_SPOKES=1, or SPOKE=<id>.",
@@ -140,11 +136,7 @@ const SPOKES_ROOT = SPOKE_MODE
   ? BASE_URL.replace(new RegExp(`${selectedSpoke!.routeBasePath}/$`), "")
   : BASE_URL;
 
-const spokes: SpokeConfig[] = ROOT_REDIRECT
-  ? []
-  : BUILD_ALL_SPOKES
-    ? allSpokes
-    : [selectedSpoke!];
+const spokes: SpokeConfig[] = ROOT_REDIRECT ? [] : BUILD_ALL_SPOKES ? allSpokes : [selectedSpoke!];
 
 for (const s of spokes) {
   const dir = path.join(REPO_ROOT, SPOKES_DIR, s.repo.split("/").pop()!);
@@ -196,21 +188,12 @@ function docsPluginOptions(spoke: SpokeConfig) {
     sidebarPath: require.resolve("./sidebars/auto.ts"),
     editUrl: ({ docPath }: { docPath: string }) =>
       `https://github.com/${spoke.repo}/edit/${spoke.ref}/docs/${docPath}`,
-    async sidebarItemsGenerator({
-      defaultSidebarItemsGenerator,
-      ...args
-    }: any) {
-      const excludeCategories = args.item.customProps?.excludeCategories as
-        | string[]
-        | undefined;
+    async sidebarItemsGenerator({ defaultSidebarItemsGenerator, ...args }: any) {
+      const excludeCategories = args.item.customProps?.excludeCategories as string[] | undefined;
       const items = await defaultSidebarItemsGenerator(args);
       return items.filter(
         (i: any) =>
-          !(
-            excludeCategories &&
-            i.type === "category" &&
-            excludeCategories.includes(i.label)
-          ),
+          !(excludeCategories && i.type === "category" && excludeCategories.includes(i.label)),
       );
     },
   };
@@ -251,9 +234,7 @@ function samplesPlugin(spoke: SpokeConfig): PluginConfig | null {
   // Samples are generated into `docs/samples`, so they ride along with the
   // docs plugin's routeBasePath. In SPOKE mode the spoke owns '/', so samples
   // live at '/docs/samples'; in BUILD_ALL_SPOKES at '/<rbp>/docs/samples'.
-  const docsRouteBase = SPOKE_MODE
-    ? "/docs/samples"
-    : `/${spoke.routeBasePath}/docs/samples`;
+  const docsRouteBase = SPOKE_MODE ? "/docs/samples" : `/${spoke.routeBasePath}/docs/samples`;
   return [
     require.resolve("./src/plugins/genai-samples-docs-plugin"),
     {
@@ -277,9 +258,7 @@ const spokePlugins: PluginConfig[] = [
   // checkouts) `firstSpoke` is undefined and there's nothing to wire here.
   ...otherSpokes.map(docsPlugin),
   ...spokes.flatMap((spoke) =>
-    [landingPagePlugin(spoke), samplesPlugin(spoke)].filter(
-      (p): p is PluginConfig => p !== null,
-    ),
+    [landingPagePlugin(spoke), samplesPlugin(spoke)].filter((p): p is PluginConfig => p !== null),
   ),
 ];
 
@@ -311,11 +290,7 @@ if (!SPOKE_MODE) {
   const rootRedirectPlugin: PluginConfig = () => ({
     name: "root-redirect",
     async postBuild({ outDir }: { outDir: string }) {
-      await fs.promises.writeFile(
-        path.join(outDir, "index.html"),
-        redirectHtml,
-        "utf8",
-      );
+      await fs.promises.writeFile(path.join(outDir, "index.html"), redirectHtml, "utf8");
     },
   });
   spokePlugins.push(rootRedirectPlugin);
@@ -405,9 +380,7 @@ const config: Config = {
               highlightSearchTermsOnTargetPage: true,
               searchBarShortcutHint: false,
               docsRouteBasePath: spokes.map((s) => docsRouteBasePath(s)),
-              docsDir: spokes.map((s) =>
-                path.join(spokeCheckoutDir(s), "docs"),
-              ),
+              docsDir: spokes.map((s) => path.join(spokeCheckoutDir(s), "docs")),
               // Scope search per spoke site so /genai/ search doesn't return
               // /openvino/ or /physicalai/ hits. Irrelevant in SPOKE mode (a
               // single site rooted at '/').

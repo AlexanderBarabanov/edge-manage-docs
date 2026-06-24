@@ -16,9 +16,7 @@ type Props = {
   className?: string;
 };
 
-export default function ProductGridDropdownNavbarItem(
-  props: Props,
-): React.JSX.Element {
+export default function ProductGridDropdownNavbarItem(props: Props): React.JSX.Element {
   return props.mobile ? <Mobile {...props} /> : <Desktop {...props} />;
 }
 
@@ -31,8 +29,7 @@ function Desktop({ position, className }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
 
-  const rawLabel =
-    spoke === undefined || spoke.id === "openvino" ? "Runtime" : spoke.label;
+  const rawLabel = spoke === undefined || spoke.id === "openvino" ? "Runtime" : spoke.label;
   const label = rawLabel.replace(`OpenVINO `, "");
 
   useEffect(() => {
