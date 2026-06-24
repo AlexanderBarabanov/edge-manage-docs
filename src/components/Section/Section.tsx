@@ -3,6 +3,7 @@ import styles from "./Section.module.css";
 
 type SectionBaseProps = {
   children: ReactNode;
+  beforeContent?: ReactElement;
 };
 
 type SectionPartProps = {
@@ -31,10 +32,11 @@ SectionIcon.displayName = "Section.Icon";
 SectionTitle.displayName = "Section.Title";
 SectionDescription.displayName = "Section.Description";
 
-const SectionRoot = ({ children }: SectionBaseProps) => {
+const SectionRoot = ({ children, beforeContent }: SectionBaseProps) => {
   return (
     <section className={styles.container}>
-      <div>{children}</div>
+      {beforeContent}
+      <div className={styles.content}>{children}</div>
     </section>
   );
 };
