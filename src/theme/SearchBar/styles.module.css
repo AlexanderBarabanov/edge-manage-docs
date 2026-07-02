@@ -10,7 +10,7 @@
   max-width: 100%;
   padding: 0.4rem 0.75rem;
   font-size: 0.9rem;
-  color: var(--ifm-navbar-link-color);
+  color: var(--geti-navbar-search-input-color);
   background: var(--ifm-navbar-search-input-background-color, var(--ifm-color-emphasis-200));
   border: 1px solid var(--ifm-color-emphasis-300);
   border-radius: 2rem;
