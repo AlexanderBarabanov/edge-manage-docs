@@ -1,3 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,100..900&display=swap");
+
 @font-face {
   src: url("../../static/fonts/roboto-flex-v30-latin-regular.woff2") format("woff2");
   font-family: "Roboto Flex";
@@ -10,6 +12,7 @@
   --global-font-apple-system: -apple-system;
   --global-font-blink-mac-system-font: BlinkMacSystemFont;
   --global-font-segoe-ui: "Segoe UI";
+  --global-font-inter: "Inter";
   --global-font-roboto: "Roboto Flex";
   --global-font-helvetica: "Helvetica";
   --global-font-arial: "Arial";
@@ -19,7 +22,7 @@
   --global-font-segoe-ui-symbol: "Segoe UI Symbol";
 
   --genai-font-family:
-    var(--global-font-roboto), var(--global-font-apple-system),
+    var(--global-font-inter), var(--global-font-roboto), var(--global-font-apple-system),
     var(--global-font-blink-mac-system-font), var(--global-font-segoe-ui),
     var(--global-font-helvetica), var(--global-font-arial), var(--global-font-sans-serif),
     var(--global-font-apple-color-emoji), var(--global-font-segoe-ui-emoji),
