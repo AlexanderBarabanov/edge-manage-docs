@@ -50,7 +50,7 @@ function Desktop({ position, className }: Props) {
   return (
     <div
       ref={ref}
-      className={clsx("navbar__item", "dropdown", "dropdown--hoverable", {
+      className={clsx("navbar__item", "dropdown", "dropdown--hoverable", styles.navbarItem, {
         "dropdown--right": position === "right",
         "dropdown--show": open,
       })}
@@ -60,14 +60,12 @@ function Desktop({ position, className }: Props) {
         role="button"
         aria-haspopup="true"
         aria-expanded={open}
-        className={clsx("navbar__link", className, {
-          "navbar__link--active": productActive,
-        })}
+        className={clsx("navbar__link", className)}
         onClick={(e) => e.preventDefault()}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            setOpen((v) => !v);
+            setOpen((isOpen) => !isOpen);
           }
         }}
       >

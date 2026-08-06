@@ -1,7 +1,7 @@
-import clsx from 'clsx';
-import React, { useEffect, useRef, useState } from 'react';
+import clsx from "clsx";
+import React, { useEffect, useRef, useState } from "react";
 
-import styles from './styles.module.css';
+import styles from "./styles.module.css";
 
 type ChevronIconProps = {
   size?: number;
@@ -35,6 +35,7 @@ const ChevronRightIcon: React.FC<ChevronIconProps> = ({ size = 24 }) => (
 
 type CarouselProps = {
   slides: React.ReactNode[];
+  showChevron?: boolean;
   autoSlideTimeout?: number;
   enableAutoSlide?: boolean;
   slidesToShow?: number;
@@ -42,6 +43,7 @@ type CarouselProps = {
 
 const Carousel: React.FC<CarouselProps> = ({
   slides = [],
+  showChevron = true,
   autoSlideTimeout = 5000,
   enableAutoSlide = true,
   slidesToShow = 1,
@@ -138,21 +140,25 @@ const Carousel: React.FC<CarouselProps> = ({
         </div>
       </div>
 
-      <button
-        className={clsx(styles.chevron, styles.chevronLeft)}
-        onClick={goToPrevious}
-        aria-label="Previous slide"
-      >
-        <ChevronLeftIcon size={40} />
-      </button>
+      {showChevron && (
+        <button
+          className={clsx(styles.chevron, styles.chevronLeft)}
+          onClick={goToPrevious}
+          aria-label="Previous slide"
+        >
+          <ChevronLeftIcon size={40} />
+        </button>
+      )}
 
-      <button
-        className={clsx(styles.chevron, styles.chevronRight)}
-        onClick={goToNext}
-        aria-label="Next slide"
-      >
-        <ChevronRightIcon size={40} />
-      </button>
+      {showChevron && (
+        <button
+          className={clsx(styles.chevron, styles.chevronRight)}
+          onClick={goToNext}
+          aria-label="Next slide"
+        >
+          <ChevronRightIcon size={40} />
+        </button>
+      )}
 
       <div className={styles.pagination}>
         {new Array(slidesPages).fill(null).map((_, index) => (
