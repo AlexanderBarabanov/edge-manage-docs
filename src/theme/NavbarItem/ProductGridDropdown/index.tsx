@@ -1,5 +1,4 @@
 import { useCurrentSpoke } from "@site/src/hooks/use-current-spoke";
-import { useNavState } from "@site/src/hooks/use-nav-state";
 import { useSpokeHref } from "@site/src/hooks/use-spoke-href";
 import { PRODUCT_CARDS } from "@site/src/hub-catalog";
 import clsx from "clsx";
@@ -25,7 +24,6 @@ export default function ProductGridDropdownNavbarItem(props: Props): React.JSX.E
 // 552-wide gradient panel containing a 2x2 product card grid.
 function Desktop({ position, className }: Props) {
   const spoke = useCurrentSpoke();
-  const { productActive } = useNavState();
   const ref = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
 

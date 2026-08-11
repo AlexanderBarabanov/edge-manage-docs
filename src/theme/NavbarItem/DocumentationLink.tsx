@@ -51,8 +51,7 @@ export default function DocumentationLinkNavbarItem(props: Props) {
   const fallbackSpoke = spokes.find(({ id }) => id === "openvino") ?? spokes[0];
   const targetSpoke = spoke ?? fallbackSpoke;
 
-  const bundledSpokeIds =
-    (siteConfig.customFields?.bundledSpokeIds as string[]) ?? [];
+  const bundledSpokeIds = (siteConfig.customFields?.bundledSpokeIds as string[]) ?? [];
   const isCrossBundle = !bundledSpokeIds.includes(targetSpoke.id);
 
   if (isCrossBundle) {
