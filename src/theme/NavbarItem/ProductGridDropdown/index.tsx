@@ -1,5 +1,4 @@
 import { useCurrentSpoke } from "@site/src/hooks/use-current-spoke";
-import { useNavState } from "@site/src/hooks/use-nav-state";
 import { useSpokeHref } from "@site/src/hooks/use-spoke-href";
 import { PRODUCT_CARDS } from "@site/src/hub-catalog";
 import clsx from "clsx";
@@ -25,7 +24,6 @@ export default function ProductGridDropdownNavbarItem(props: Props): React.JSX.E
 // 552-wide gradient panel containing a 2x2 product card grid.
 function Desktop({ position, className }: Props) {
   const spoke = useCurrentSpoke();
-  const { productActive } = useNavState();
   const ref = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
 
@@ -50,7 +48,7 @@ function Desktop({ position, className }: Props) {
   return (
     <div
       ref={ref}
-      className={clsx("navbar__item", "dropdown", "dropdown--hoverable", {
+      className={clsx("navbar__item", "dropdown", "dropdown--hoverable", styles.navbarItem, {
         "dropdown--right": position === "right",
         "dropdown--show": open,
       })}
@@ -60,14 +58,12 @@ function Desktop({ position, className }: Props) {
         role="button"
         aria-haspopup="true"
         aria-expanded={open}
-        className={clsx("navbar__link", className, {
-          "navbar__link--active": productActive,
-        })}
+        className={clsx("navbar__link", className)}
         onClick={(e) => e.preventDefault()}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            setOpen((v) => !v);
+            setOpen((isOpen) => !isOpen);
           }
         }}
       >
