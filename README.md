@@ -1,110 +1,50 @@
 # OpenVINO Documentation Hub
 
-Hub-spoke Docusaurus platform. The hub owns the framework, theme, and deployment. Spokes own their content.
+This repository builds and deploys OpenVINO documentation from registered product repositories.
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for content conventions, local development, and instructions for adding a product repository.
 
 ## Architecture
 
-Each spoke is **independent self-contained website**, each with its own S3 prefix. They share a domain and a common theme but are built and deployed separately. The hub deployment is a configuration of redirection to one of spokes landing page from the root index.
+The documentation system has two repository roles:
 
-Spokes are repos with a `docs/` folder. The hub clones a spoke at build time, produces a standalone Docusaurus bundle for it, and deploys that bundle to `/<routeBasePath>/`. The hub itself builds separately and deploys to `/`. Spokes need no Docusaurus config.
-
-| Concern | Owner |
+| Role | Responsibilities |
 |---|---|
-| Content (Markdown, MDX, images) | Spoke |
-| Versioning (`docs-versions/`) | Spoke |
-| CI dispatch to hub | Spoke |
-| Theme, components, build, hosting | Hub |
+| Hub (`openvino.docs`) | Owns Docusaurus, shared components, configuration, builds, previews, and deployment. |
+| Product repositories | Own their documentation content, images, and version snapshots. |
 
-Spokes are registered in [`spokes.yml`](spokes.yml).
+## Repository integration
 
-## Deployment model
+[`spokes.yml`](spokes.yml) is the starting point for the architecture. It registers each product repository and defines:
 
-All deploys target a single S3 bucket.
+- the repository and branch containing the content;
+- the paths that the hub reads;
+- the product identifier and published URL path;
+- optional processing required before the build.
 
-| Trigger | What deploys | Where |
-|---|---|---|
-| Spoke PR labeled `deploy-doc-preview` | Hub + changed spoke | `pr/<spoke>/<PR#>/` |
-| Hub PR labeled `deploy-doc-preview` | Hub + all spokes | `pr/hub/<PR#>/` |
-| Spoke PR merged to main | That spoke | `/<rbp>/` |
-| Push to hub `main` | Hub only | `/` |
-| PR closed | — | Preview prefix deleted |
+GitHub Apps provide authenticated communication between repositories. A workflow in a product repository sends a `repository_dispatch` event to the hub with the source repository and revision to build. The hub authenticates the sender and validates the source against [`spokes.yml`](spokes.yml). For a pull request, it deploys that revision as a temporary preview and reports the result back to the product pull request. For merged content, it publishes the product site.
 
-**Release:** no special trigger. Snapshot versions into `docs-versions/`, merge to main — the normal merge flow deploys to prod.
+During a build, the hub fetches the configured content, applies the shared Docusaurus configuration, and deploys the generated product site.
 
-## PR previews
+Start with:
 
-Add `deploy-doc-preview` to your PR. The hub posts a preview link as a PR comment and updates it on each push. Preview is cleaned up when the PR closes.
-
-- **Spoke PR:** builds hub + the triggering spoke only. Other spoke nav links resolve to prod.
-- **Hub PR:** builds hub first, then all spokes in parallel.
-
-## Versioning
-
-```
-your-repo/
-├── docs/                    ← next (unreleased)
-└── docs-versions/
-    ├── versions.json        ← ["v2.0", "v1.1"]
-    └── versioned_docs/
-        ├── version-v2.0/
-        └── version-v1.1/
-```
-
-Run `scripts/cut-doc-version.sh <version>` to snapshot `docs/` into a new version, then merge to main.
-
-## Manual deployment
-
-Trigger a deployment without a code push via the GitHub UI or the CLI.
-
-**GitHub UI** — Actions → Main → Run workflow → pick a target:
-
-| Target | What deploys |
-|---|---|
-| `all` | Hub + all spokes |
-| `hub` | Hub only |
-| `spoke` + Spoke ID | Single spoke |
-
-**CLI:**
-```sh
-# Everything
-gh api repos/AlexanderBarabanov/edge-manage-docs/dispatches \
-  -f event_type=deploy
-
-# Hub only
-gh api repos/AlexanderBarabanov/edge-manage-docs/dispatches \
-  -f event_type=deploy \
-  -f client_payload='{"target":"hub"}'
-
-# Single spoke
-gh api repos/AlexanderBarabanov/edge-manage-docs/dispatches \
-  -f event_type=deploy \
-  -f client_payload='{"target":"spoke","spoke_id":"genai"}'
-```
+- [`spokes.yml`](spokes.yml) to see which product repositories are connected;
+- [`docusaurus.config.ts`](docusaurus.config.ts) to see how their content is assembled;
+- [`.github/workflows`](.github/workflows) to see how builds and deployments are coordinated;
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) to add or work on product documentation.
 
 ## Local development
+
+Requirements: Node.js 22, Git, and Git LFS when a product repository uses LFS.
 
 ```sh
 npm install
 
-# Root redirect page + all spokes
+# Build all registered product sites
 BUILD_ALL_SPOKES=1 BASE_URL=/ SITE_URL=https://docs.example.com npm run build
 
-# One spoke, nested under /<rbp>/ with a "/" → /<rbp>/ redirect, so the
-# served root lands on the spoke (local-only layout)
-SPOKE=genai SITE_URL=https://docs.example.com npm run build
+# Or build one product site
+SPOKE=openvino SITE_URL=https://docs.example.com npm run build
 
-# Single spoke as the prod per-spoke artifact (rooted at /<rbp>/, no redirect)
-CI=1 SPOKE=genai BASE_URL=/genai/ SITE_URL=https://docs.example.com npm run build
-
-# Site root redirect only
-ROOT_REDIRECT=1 BASE_URL=/ SITE_URL=https://docs.example.com npm run build
-
-# Use a local spoke checkout instead of cloning from GitHub
-./scripts/clone-spokes.sh --use-local=owner/repo:/abs/path/to/checkout
-
-npm run serve   # serve build/ at localhost:3000
+npm run serve
 ```
-
-A local `SPOKE=<id>` build redirects `/` to that spoke, so `npm run serve` lands on it. In CI (`CI=true`) the same command builds the production per-spoke artifact rooted at `/<rbp>/`; set `CI=1` locally to reproduce it.
-
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for spoke content conventions and how to register a new spoke.
