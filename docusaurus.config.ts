@@ -4,6 +4,8 @@ import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { themes as prismThemes } from "prism-react-renderer";
 import { load as yamlLoad } from "js-yaml";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import { SPOKE_CATALOG } from "./src/hub-catalog";
 
 // This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
@@ -188,6 +190,11 @@ function docsPluginOptions(spoke: SpokeConfig) {
     sidebarPath: require.resolve("./sidebars/auto.ts"),
     editUrl: ({ docPath }: { docPath: string }) =>
       `https://github.com/${spoke.repo}/edit/${spoke.ref}/docs/${docPath}`,
+    // LaTeX math support (remark-math parses $...$ / $$...$$ into math
+    // nodes, rehype-katex typesets them) -- see docusaurus_stage.py's math
+    // handling, which emits real $...$/$$...$$ once this is configured.
+    remarkPlugins: [remarkMath],
+    rehypePlugins: [rehypeKatex],
     async sidebarItemsGenerator({ defaultSidebarItemsGenerator, ...args }: any) {
       const excludeCategories = args.item.customProps?.excludeCategories as string[] | undefined;
       const items = await defaultSidebarItemsGenerator(args);
@@ -299,6 +306,17 @@ if (!SPOKE_MODE) {
 const config: Config = {
   title: "OpenVINO Documentation",
   favicon: "img/favicon.png",
+
+  // KaTeX's stylesheet (required for rehype-katex output to render
+  // correctly), per Docusaurus's documented math-support recipe.
+  stylesheets: [
+    {
+      href: "https://cdn.jsdelivr.net/npm/katex@0.13.24/dist/katex.min.css",
+      type: "text/css",
+      integrity: "sha384-odtC+0UGzzFL/6PNoE8rX/SPnx3vxxpBSChTMNfKAX2Yb8OhqFTkQtjfvbn5CTQZ",
+      crossorigin: "anonymous",
+    },
+  ],
 
   // Production URL of the site. Override per deployment via $SITE_URL.
   url: SITE_ORIGIN,
