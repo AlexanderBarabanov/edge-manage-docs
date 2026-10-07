@@ -252,6 +252,18 @@ function samplesPlugin(spoke: SpokeConfig): PluginConfig | null {
 
 const [firstSpoke, ...otherSpokes] = spokes;
 
+// Full route base (with this build's baseUrl) under which a spoke's docs are
+// served, e.g. "/openvino/docs". Used to scope the cross-spoke search index.
+const docsFullBase = (spoke: SpokeConfig): string =>
+  `${BASE_URL}${docsRouteBasePath(spoke)}`.replace(/\/{2,}/g, "/");
+
+// Directory (relative to outDir) a spoke's search-index file is written into so
+// it is served at `<spoke href>search-index-<id>.json`. In SPOKE mode the
+// bundle root already is the spoke prefix; in all-spoke builds each spoke sits
+// under its own routeBasePath.
+const spokeOutSubdir = (spoke: SpokeConfig): string =>
+  SPOKE_MODE ? "" : spoke.routeBasePath;
+
 const spokePlugins: PluginConfig[] = [
   // The first spoke is wired via presets.classic.docs (below), so we only emit
   // docs plugins for additional spokes. In root-redirect builds (no spoke
@@ -261,6 +273,23 @@ const spokePlugins: PluginConfig[] = [
     [landingPagePlugin(spoke), samplesPlugin(spoke)].filter((p): p is PluginConfig => p !== null),
   ),
 ];
+
+// Cross-spoke search: emit a portable search index per spoke built here. Each
+// spoke deploys independently, so its file is placed under the spoke prefix and
+// the client merges every spoke's index at runtime (see use-site-search.ts).
+if (spokes.length > 0) {
+  spokePlugins.push([
+    require.resolve("./src/plugins/site-search-index"),
+    {
+      spokes: spokes.map((s) => ({
+        id: s.id,
+        label: SPOKE_CATALOG[s.id]?.label ?? s.id,
+        docsBase: docsFullBase(s),
+        outSubdir: spokeOutSubdir(s),
+      })),
+    },
+  ]);
+}
 
 // Site root ("/") redirect. ROOT_REDIRECT and BUILD_ALL_SPOKES own the root of
 // their bundle; instead of a hub landing page we emit a single index.html that
@@ -365,35 +394,11 @@ const config: Config = {
 
   plugins: spokePlugins,
 
-  themes: [
-    // The search theme's <SearchBar> hooks into the docs plugin's global
-    // data. In root-redirect builds there's no docs plugin, so we drop the
-    // search theme entirely (the redirect bundle has no content to search).
-
-    ...(ROOT_REDIRECT
-      ? []
-      : ([
-          [
-            require.resolve("@easyops-cn/docusaurus-search-local"),
-            {
-              hashed: true,
-              highlightSearchTermsOnTargetPage: true,
-              searchBarShortcutHint: false,
-              docsRouteBasePath: spokes.map((s) => docsRouteBasePath(s)),
-              docsDir: spokes.map((s) => path.join(spokeCheckoutDir(s), "docs")),
-              // Scope search per spoke site so /genai/ search doesn't return
-              // /openvino/ or /physicalai/ hits. Irrelevant in SPOKE mode (a
-              // single site rooted at '/').
-              ...(SPOKE_MODE
-                ? {}
-                : {
-                    searchContextByPaths: spokes.map((s) => s.routeBasePath),
-                    useAllContextsWithNoSearchContext: true,
-                  }),
-            },
-          ],
-        ] as Config["themes"] & object[])),
-  ],
+  // Search is provided by the swizzled theme/SearchBar (src/theme/SearchBar),
+  // which merges every spoke's portable index (emitted by the
+  // site-search-index plugin) so a query from any spoke returns hits across
+  // the whole site. Root-redirect builds have no content, so no search UI.
+  themes: [],
 
   themeConfig: {
     colorMode: { disableSwitch: true, defaultMode: "light" },
