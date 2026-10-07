@@ -214,6 +214,28 @@ function extractSidebarItem(items: any[], idSuffix: string): any | undefined {
   return undefined;
 }
 
+// Removes and returns the first *link-less* category (no index.md of its
+// own, so sidebarItemId() is undefined -- a pure bucket folder) whose first
+// child's id contains `idInfix`. Used for wrapper categories like
+// model-optimization-guide/ that must be discarded wholesale once their
+// children are re-parented elsewhere.
+function extractLinklessCategoryByChildId(items: any[], idInfix: string): any | undefined {
+  const index = items.findIndex(
+    (item) =>
+      item.type === "category" &&
+      sidebarItemId(item) === undefined &&
+      item.items?.some((child: any) => sidebarItemId(child)?.includes(idInfix)),
+  );
+  if (index !== -1) return items.splice(index, 1)[0];
+  for (const item of items) {
+    if (item.type === "category" && item.items) {
+      const nested = extractLinklessCategoryByChildId(item.items, idInfix);
+      if (nested) return nested;
+    }
+  }
+  return undefined;
+}
+
 // Finds (without removing) the first category whose id ends with `idSuffix`.
 function findSidebarCategory(items: any[], idSuffix: string): any | undefined {
   for (const item of items) {
@@ -285,6 +307,75 @@ function applyOpenvinoSidebarOverrides(items: any[]): void {
   );
   if (getStarted?.items && systemRequirements) {
     getStarted.items.push(systemRequirements);
+  }
+
+  // Single-parent-but-flat clusters: each child below physically lives as a
+  // sibling of its toctree parent (not nested in parent/dir/stem/), so
+  // Docusaurus's physical-folder-mirroring autogenerator places it as a flat
+  // top-level sibling of the parent category instead of inside it. Unlike
+  // the multi-parent cases above, each of these has exactly one real parent,
+  // so a plain extract-and-push (no by-reference sharing) is correct.
+
+  // Cluster 1: convert-model-to-ir's 7 per-framework children physically sit
+  // flat in model-preparation/, as siblings of conversion-parameters.md and
+  // setting-input-shapes.md (convert-model-to-ir's own aunts, not children).
+  // Confirmed live bug: without this fix, convert-model-tensorflow.md and
+  // conversion-parameters.md collide at sidebar_position 2 (and
+  // convert-model-onnx.md / setting-input-shapes.md collide at position 3).
+  const convertModelToIr = findSidebarCategory(items, "convert-model-to-ir");
+  if (convertModelToIr?.items) {
+    for (const suffix of [
+      "convert-model-pytorch",
+      "convert-model-tensorflow",
+      "convert-model-onnx",
+      "convert-model-tensorflow-lite",
+      "convert-model-paddle",
+      "convert-model-jax",
+      "convert-model-keras",
+    ]) {
+      const found = extractSidebarItem(items, suffix);
+      if (found) convertModelToIr.items.push(found);
+    }
+  }
+
+  // Cluster 2: model-optimization's 3 children physically live in a
+  // differently-named sibling folder, model-optimization-guide/ (each
+  // already its own category with further children). The real site nests
+  // these 3 under "Model Optimization"; without this fix they render as a
+  // separate, detached top-level "Model Optimization Guide" category.
+  // model-optimization-guide/ has no index.md of its own -- it's a pure
+  // bucket folder -- so the whole wrapper category (not its 3 children
+  // individually) must be extracted and discarded, moving only its `items`
+  // up; otherwise the now-empty wrapper is left behind with neither a link
+  // nor subitems, which Docusaurus rejects at build time.
+  const modelOptimization = findSidebarCategory(items, "model-optimization");
+  const modelOptimizationGuide = extractLinklessCategoryByChildId(
+    items,
+    "model-optimization-guide/",
+  );
+  if (modelOptimization?.items && modelOptimizationGuide?.items) {
+    modelOptimization.items.push(...modelOptimizationGuide.items);
+  }
+
+  // Cluster 3: low-precision-transformations/step3-main.rst and
+  // step4-cleanup.rst each cross-link exactly one operation-reference page
+  // that physically "belongs" (by folder) to the other. Deep, rarely
+  // browsed; fixed the same way for completeness/consistency.
+  const step3Main = findSidebarCategory(items, "low-precision-transformations/step3-main");
+  if (step3Main?.items) {
+    const found = extractSidebarItem(
+      items,
+      "low-precision-transformations/step4-cleanup/fake-quantize-decomposition",
+    );
+    if (found) step3Main.items.push(found);
+  }
+  const step4Cleanup = findSidebarCategory(items, "low-precision-transformations/step4-cleanup");
+  if (step4Cleanup?.items) {
+    const found = extractSidebarItem(
+      items,
+      "low-precision-transformations/step3-main/quantization/fold-fake-quantize",
+    );
+    if (found) step4Cleanup.items.push(found);
   }
 }
 
