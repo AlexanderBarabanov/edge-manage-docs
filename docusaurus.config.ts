@@ -7,6 +7,7 @@ import { load as yamlLoad } from "js-yaml";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { SPOKE_CATALOG } from "./src/hub-catalog";
+import { rehypeFixStaticAssetPaths } from "./src/plugins/rehype-fix-static-asset-paths";
 
 // This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
 
@@ -577,7 +578,7 @@ function docsPluginOptions(spoke: SpokeConfig) {
     // nodes, rehype-katex typesets them) -- see docusaurus_stage.py's math
     // handling, which emits real $...$/$$...$$ once this is configured.
     remarkPlugins: [remarkMath],
-    rehypePlugins: [rehypeKatex],
+    rehypePlugins: [rehypeKatex, rehypeFixStaticAssetPaths(spoke.routeBasePath)],
     async sidebarItemsGenerator({ defaultSidebarItemsGenerator, ...args }: any) {
       const excludeCategories = args.item.customProps?.excludeCategories as string[] | undefined;
       const items = await defaultSidebarItemsGenerator(args);
@@ -732,6 +733,36 @@ if (!SPOKE_MODE && process.env.INCLUDE_API_DOCS === "1") {
     },
   });
   spokePlugins.push(apiDocsLocalMountPlugin);
+}
+
+// `static/_static/` is a small, committed (not gitignored) snapshot of the
+// handful of shared Sphinx `_static/` assets that narrative pages embed
+// directly as raw HTML (the install selector widget, benchmark CSS/JS,
+// conformance report tables -- see
+// `tools/vendor_shared_static_assets.py` and `rehypeFixStaticAssetPaths`).
+// Unlike `static/api/`, it does not depend on `INCLUDE_API_DOCS` or a local
+// Sphinx build, so it must always be mirrored for local-preview parity,
+// using the exact same reasoning as the `api-docs-local-mount` plugin
+// above: static assets land at the webpack output root regardless of
+// `baseUrl`/`routeBasePath` nesting, so outside SPOKE_MODE they need an
+// explicit copy into every active spoke's `<rbp>/_static/` to match the
+// `/${routeBasePath}/_static/...` hrefs `rehypeFixStaticAssetPaths` bakes in.
+if (!SPOKE_MODE) {
+  const sharedStaticLocalMountPlugin: PluginConfig = () => ({
+    name: "shared-static-local-mount",
+    async postBuild({ outDir }: { outDir: string }) {
+      const sourceDir = path.join(outDir, "_static");
+      if (!fs.existsSync(sourceDir)) {
+        return;
+      }
+      for (const spoke of spokes) {
+        const destDir = path.join(outDir, spoke.routeBasePath, "_static");
+        await fs.promises.mkdir(path.dirname(destDir), { recursive: true });
+        await fs.promises.cp(sourceDir, destDir, { recursive: true });
+      }
+    },
+  });
+  spokePlugins.push(sharedStaticLocalMountPlugin);
 }
 
 const config: Config = {

@@ -40,4 +40,4 @@ if [[ ! -f "$SCRIPT" ]]; then
 fi
 
 echo "→ INCLUDE_API_DOCS=1: running $SCRIPT"
-python3 "$SCRIPT" --target-dir "$ROOT_DIR/static/api"
+python3 "$SCRIPT" --target-dir "$ROOT_DIR/static"
