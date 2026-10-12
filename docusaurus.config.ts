@@ -702,6 +702,38 @@ if (!SPOKE_MODE) {
   spokePlugins.push(rootRedirectPlugin);
 }
 
+// `static/api/` (populated by `tools/integrate_api_docs.py` when
+// INCLUDE_API_DOCS=1) always gets copied verbatim to the webpack output
+// root by Docusaurus's own static-asset handling, regardless of baseUrl.
+// In SPOKE_MODE that output root *is* the `/<rbp>/` prefix once deployed
+// (see `effectiveRouteBasePath` above), so `/openvino/api/...` hrefs baked
+// into the copied HTML resolve correctly with no extra work. Locally
+// (LOCAL_SINGLE_SPOKE / BUILD_ALL_SPOKES), baseUrl is "/" and docs pages are
+// nested under `/<rbp>/` via `docsRouteBasePath` instead — static assets get
+// no such nesting, so without this step `static/api/` would only resolve at
+// `/api/...`, one level shallower than the `/openvino/api/...` hrefs the
+// integration script bakes in. Mirror it into `<outDir>/<rbp>/api/` after
+// build so local preview matches production.
+if (!SPOKE_MODE && process.env.INCLUDE_API_DOCS === "1") {
+  const apiDocsLocalMountPlugin: PluginConfig = () => ({
+    name: "api-docs-local-mount",
+    async postBuild({ outDir }: { outDir: string }) {
+      const sourceDir = path.join(outDir, "api");
+      if (!fs.existsSync(sourceDir)) {
+        return;
+      }
+      const spoke = LOCAL_SINGLE_SPOKE ? selectedSpoke! : allSpokes.find((s) => s.id === "openvino");
+      if (!spoke) {
+        return;
+      }
+      const destDir = path.join(outDir, spoke.routeBasePath, "api");
+      await fs.promises.mkdir(path.dirname(destDir), { recursive: true });
+      await fs.promises.cp(sourceDir, destDir, { recursive: true });
+    },
+  });
+  spokePlugins.push(apiDocsLocalMountPlugin);
+}
+
 const config: Config = {
   title: "OpenVINO Documentation",
   favicon: "img/favicon.png",
