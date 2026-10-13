@@ -6,7 +6,8 @@
     "docusaurus": "docusaurus",
     "clone-spokes": "./scripts/clone-spokes.sh",
     "gen-samples": "./scripts/run-spoke-prebuild.sh",
-    "prebuild": "npm run clone-spokes && npm run gen-samples",
+    "gen-api-docs": "./scripts/run-api-docs-prebuild.sh",
+    "prebuild": "npm run clone-spokes && npm run gen-samples && npm run gen-api-docs",
     "start": "npm run prebuild && docusaurus start",
     "build": "npm run typecheck && npm run lint && docusaurus build",
     "clear": "docusaurus clear",
@@ -24,22 +25,25 @@
     "clsx": "2.1.1",
     "dompurify": "^3.0.6",
     "js-yaml": "4.1.0",
+    "katex": "^0.18.9",
     "react": "18.3.1",
     "react-dom": "18.3.1",
+    "rehype-katex": "^7.0.1",
+    "remark-math": "^6.0.0",
     "shiki": "^4.2.0"
   },
   "devDependencies": {
-    "@eslint/js": "^9.30.1",
     "@docusaurus/module-type-aliases": "3.10.0",
     "@docusaurus/tsconfig": "3.10.0",
     "@docusaurus/types": "3.10.0",
+    "@eslint/js": "^9.30.1",
     "@types/dompurify": "^3.0.5",
     "@types/js-yaml": "4.0.9",
     "eslint": "^9.30.1",
     "globals": "^15.8.0",
     "prettier": "^3.1.1",
-    "typescript-eslint": "^8.35.1",
-    "typescript": "5.7.3"
+    "typescript": "5.7.3",
+    "typescript-eslint": "^8.35.1"
   },
   "overrides": {
     "serialize-javascript": "^7.0.3",
