@@ -122,6 +122,33 @@ checkout), which copies the raw Sphinx HTML output plus shared static assets
 into `static/`, resolves filename collisions, rewrites every internal/nav
 link to work inside Docusaurus, and validates there are zero broken links.
 
+### Gotchas
+
+- **Always use `npm run build` / `npm run serve`, not a bare
+  `npx docusaurus build` / `npx docusaurus serve`.** `npm run build` fires
+  npm's `prebuild` lifecycle hook, which is what actually runs
+  `clone-spokes`, `gen-samples`, and — critically for this section —
+  `gen-api-docs` (`tools/integrate_api_docs.py`). Invoking `docusaurus
+  build`/`serve` directly skips that hook entirely and silently reuses
+  whatever is already physically present under `static/`. In particular,
+  `static/_static/` as checked into git only contains a small,
+  separately-vendored subset (the handful of shared assets narrative pages
+  embed directly); it is missing the full Sphinx theme assets (
+  `styles/theme.css`, `pygments.css`, the fontawesome icon set, etc.) that
+  the API reference pages need, and which only `integrate_api_docs.py`'s
+  blanket `_static/` copy provides. The symptom is easy to miss: the API
+  page itself still returns HTTP 200, but renders with no sidebar, no
+  code-highlighting, and no separators, because its CSS/font requests are
+  404ing in the background.
+- **`INCLUDE_API_DOCS=1` must be set for every build you want API docs
+  in, not just once.** Besides gating `gen-api-docs`, it separately gates
+  the `postBuild` plugin in `docusaurus.config.ts` that mirrors
+  `static/api/` into `build/<routeBasePath>/api/` for local preview.
+  Rebuilding without it set — even if `static/api/` is already fully
+  populated on disk from a previous run — will silently omit the API
+  pages from `build/` (a 404 on the page itself this time, not just its
+  assets).
+
 **Measured timing** (same machine, Python API only, 2,875 files):
 
 | Step | Time |
